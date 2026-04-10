@@ -1,0 +1,32 @@
+# Secrets — NEVER commit
+.env
+.env.local
+.env.*.local
+
+# Node / build
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+
+# Editor / OS
+.vscode/
+.idea/
+.DS_Store
+Thumbs.db
+
+# Vitest / coverage
+coverage/
+.nyc_output/
+
+# Chrome extension packaging
+*.crx
+*.pem
+meetingscribe-*.zip
+
+# Temporary
+*.tmp
+*.bak
+*.mjs.timestamp-*
+vitest.config.ts.timestamp-*

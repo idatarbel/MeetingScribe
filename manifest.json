@@ -1,0 +1,55 @@
+{
+  "manifest_version": 3,
+  "name": "MeetingScribe",
+  "description": "Take notes on calendar meetings and save them to Google Drive, OneDrive, or Dropbox.",
+  "version": "0.0.1",
+  "minimum_chrome_version": "116",
+  "icons": {
+    "16": "assets/icons/icon-16.png",
+    "32": "assets/icons/icon-32.png",
+    "48": "assets/icons/icon-48.png",
+    "128": "assets/icons/icon-128.png"
+  },
+  "action": {
+    "default_popup": "src/popup/index.html",
+    "default_icon": {
+      "16": "assets/icons/icon-16.png",
+      "32": "assets/icons/icon-32.png"
+    },
+    "default_title": "MeetingScribe"
+  },
+  "options_page": "src/options/index.html",
+  "background": {
+    "service_worker": "src/background/index.ts",
+    "type": "module"
+  },
+  "content_scripts": [
+    {
+      "matches": ["https://calendar.google.com/*"],
+      "js": ["src/content/gcal.ts"]
+    },
+    {
+      "matches": [
+        "https://outlook.office.com/*",
+        "https://outlook.office365.com/*",
+        "https://outlook.live.com/*"
+      ],
+      "js": ["src/content/outlook.ts"]
+    }
+  ],
+  "permissions": [
+    "identity",
+    "storage",
+    "alarms",
+    "notifications"
+  ],
+  "host_permissions": [
+    "https://www.googleapis.com/*",
+    "https://accounts.google.com/*",
+    "https://login.microsoftonline.com/*",
+    "https://graph.microsoft.com/*",
+    "https://api.dropboxapi.com/*",
+    "https://content.dropboxapi.com/*",
+    "https://www.dropbox.com/*"
+  ]
+}
