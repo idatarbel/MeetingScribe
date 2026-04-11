@@ -197,6 +197,8 @@ async function handleOpenNotes(payload: {
   title: string;
   startTime?: string;
   endTime?: string;
+  organizer?: string;
+  meetingLink?: string;
 }): Promise<void> {
   // Enrich from cached events — the content script only sends basic metadata,
   // but the cache has full event data (attendees, organizer, conferencing, etc.)
@@ -256,9 +258,12 @@ async function handleOpenNotes(payload: {
   const endTime = fullEvent?.endTime ?? payload.endTime;
   if (startTime) params.set('startTime', startTime);
   if (endTime) params.set('endTime', endTime);
-  if (fullEvent?.organizer) params.set('organizer', fullEvent.organizer);
+  // Use cache data first, fall back to content script metadata
+  const eventOrganizer = fullEvent?.organizer ?? payload.organizer;
+  const eventMeetingLink = fullEvent?.dialIn?.url ?? payload.meetingLink;
+  if (eventOrganizer) params.set('organizer', eventOrganizer);
   if (fullEvent?.location) params.set('location', fullEvent.location);
-  if (fullEvent?.dialIn?.url) params.set('meetingLink', fullEvent.dialIn.url);
+  if (eventMeetingLink) params.set('meetingLink', eventMeetingLink);
   if (fullEvent?.attendees && fullEvent.attendees.length > 0) {
     params.set('attendees', JSON.stringify(fullEvent.attendees));
   }
@@ -499,7 +504,9 @@ function outlookContentScript(): void {
   const BTN_ID = 'meetingscribe-take-notes-btn';
   let currentMeetingTitle = '';
 
-  function createButton(title: string, startTime?: string): HTMLButtonElement {
+  function createButton(title: string, meta?: {
+    startTime?: string; endTime?: string; organizer?: string; meetingLink?: string;
+  }): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.id = BTN_ID;
     btn.textContent = '\u{1F4DD} Take Notes';
@@ -522,7 +529,15 @@ function outlookContentScript(): void {
       try {
         chrome.runtime.sendMessage({
           type: 'OPEN_NOTES',
-          payload: { eventId: `outlook-${Date.now()}`, provider: 'microsoft', title, startTime },
+          payload: {
+            eventId: `outlook-${Date.now()}`,
+            provider: 'microsoft',
+            title,
+            startTime: meta?.startTime,
+            endTime: meta?.endTime,
+            organizer: meta?.organizer,
+            meetingLink: meta?.meetingLink,
+          },
         }).catch(() => {
           alert('MeetingScribe was updated. Please reload this page (F5) to reconnect.');
         });
@@ -591,22 +606,41 @@ function outlookContentScript(): void {
 
     if (title === '(No title)') return;
 
-    // Extract meeting time from the detail panel text
-    // Look for patterns like "Thu 4/9/2026 12:00 PM - 1:00 PM"
-    let startTime: string | undefined;
+    // Extract meeting metadata from the detail panel text
     const panelText = detailPanel.textContent ?? '';
+
+    // Extract time: "Thu 4/9/2026 12:00 PM - 1:00 PM"
+    let startTime: string | undefined;
+    let endTime: string | undefined;
     const timeMatch = panelText.match(
-      /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM))/i,
+      /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM))\s*-\s*(\d{1,2}:\d{2}\s*(?:AM|PM))/i,
     );
     if (timeMatch) {
       try {
-        const dateStr = `${timeMatch[1]} ${timeMatch[2]}`;
-        const parsed = new Date(dateStr);
-        if (!isNaN(parsed.getTime())) {
-          startTime = parsed.toISOString();
-        }
+        const startStr = `${timeMatch[1]} ${timeMatch[2]}`;
+        const endStr = `${timeMatch[1]} ${timeMatch[3]}`;
+        const parsedStart = new Date(startStr);
+        const parsedEnd = new Date(endStr);
+        if (!isNaN(parsedStart.getTime())) startTime = parsedStart.toISOString();
+        if (!isNaN(parsedEnd.getTime())) endTime = parsedEnd.toISOString();
       } catch { /* ignore parse errors */ }
     }
+
+    // Extract organizer: "Sarah Khan invited you" or "Organizer: ..."
+    let outlookOrganizer: string | undefined;
+    const orgMatch = panelText.match(/(.+?)\s+invited you/i);
+    if (orgMatch) {
+      outlookOrganizer = orgMatch[1]?.trim();
+    }
+
+    // Extract meeting link: any URL in the panel text
+    let outlookMeetingLink: string | undefined;
+    const linkMatch = panelText.match(/(https?:\/\/\S+)/);
+    if (linkMatch) {
+      outlookMeetingLink = linkMatch[1];
+    }
+
+    // Attendee extraction from Outlook DOM is limited — the cache/API provides full attendee list
 
     // If the meeting title changed, remove old button and create new one
     if (title !== currentMeetingTitle) {
@@ -644,7 +678,7 @@ function outlookContentScript(): void {
     // Clear previous content
     shadow.innerHTML = '';
 
-    const btn = createButton(title, startTime);
+    const btn = createButton(title, { startTime, endTime, organizer: outlookOrganizer, meetingLink: outlookMeetingLink });
     btn.style.position = 'relative';
     btn.style.top = 'auto';
     btn.style.right = 'auto';
