@@ -28,6 +28,7 @@
     "@tiptap/react": "^2.27.2",
     "@tiptap/starter-kit": "^2.27.2",
     "docx": "^9.6.1",
+    "marked": "^18.0.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "turndown": "^7.2.4"

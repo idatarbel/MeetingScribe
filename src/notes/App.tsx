@@ -12,6 +12,7 @@ import { SaveButton } from './components/SaveButton';
 import { WordCount } from './components/WordCount';
 import { buildNoteTemplate } from '@/utils/note-template';
 import { htmlToDocxBase64 } from '@/utils/docx-export';
+import { marked } from 'marked';
 import type { CalendarEvent, OAuthProvider, NoteDraft, NoteFormat } from '@/types';
 import { STORAGE_KEYS } from '@/types';
 import TurndownService from 'turndown';
@@ -66,37 +67,82 @@ export function App() {
     : new Date().toISOString().slice(0, 10);
   const draftKey = `${safeTitle}_${dateStr}`;
 
-  // Build the initial note template on first load
+  // The consistent base name used for cloud files (shared across attendees)
+  const meetingBaseName = generateFileBaseName(title, startTime);
+
+  // Load content: Cloud → Local Draft → Fresh Template (in priority order)
   useEffect(() => {
     if (initialized) return;
 
-    // Check for a saved draft for THIS specific meeting
-    loadDraft(draftKey).then((draft) => {
+    (async () => {
+      // 1. Try loading from cloud (another attendee may have saved notes already)
+      // Need the routing rule to know where to look
+      const settingsResult = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+      const settings = (settingsResult[STORAGE_KEYS.SETTINGS] as import('@/types').ExtensionSettings) ?? null;
+      const titleLower = title.toLowerCase();
+      const rule = settings?.routingRules.find(
+        (r: import('@/types').RoutingRule) =>
+          r.enabled && r.match.titleContains &&
+          (titleLower === r.match.titleContains.toLowerCase() ||
+           titleLower.includes(r.match.titleContains.toLowerCase()) ||
+           r.match.titleContains.toLowerCase().includes(titleLower)),
+      );
+
+      if (rule) {
+        try {
+          const cloudFolderPath = `${rule.destination.folderPath}/${meetingBaseName}`;
+          const response = await chrome.runtime.sendMessage({
+            type: 'LOAD_CLOUD_NOTES',
+            payload: {
+              accountId: rule.destination.accountId,
+              folderPath: cloudFolderPath,
+              meetingBaseName,
+              driveId: rule.destination.driveId,
+            },
+          });
+
+          if (response?.ok && response.found && response.content) {
+            console.log('[MeetingScribe] Loaded existing notes from cloud');
+            // Convert markdown back to HTML for the editor
+            const html = await marked.parse(response.content);
+            setContentHtml(html);
+            setInitialized(true);
+            return;
+          }
+        } catch (err) {
+          console.warn('[MeetingScribe] Cloud load failed, falling back to local:', err);
+        }
+      }
+
+      // 2. Try local draft
+      const draft = await loadDraft(draftKey);
       if (draft) {
         setContentHtml(draft.contentHtml);
-      } else {
-        // Build template from event metadata (enriched by background worker)
-        const event: CalendarEvent = {
-          id: eventId,
-          provider,
-          accountEmail: '',
-          title,
-          startTime: startTime ?? new Date().toISOString(),
-          endTime: endTime ?? new Date().toISOString(),
-          attendees: attendees.map((a) => ({
-            email: a.email,
-            name: a.name,
-            responseStatus: 'accepted' as const,
-          })),
-          isAllDay: false,
-          organizer,
-          location,
-          dialIn: meetingLink ? { raw: meetingLink, url: meetingLink, platform: 'other' as const } : undefined,
-        };
-        setContentHtml(buildNoteTemplate(event));
+        setInitialized(true);
+        return;
       }
+
+      // 3. Fresh template from event metadata
+      const event: CalendarEvent = {
+        id: eventId,
+        provider,
+        accountEmail: '',
+        title,
+        startTime: startTime ?? new Date().toISOString(),
+        endTime: endTime ?? new Date().toISOString(),
+        attendees: attendees.map((a) => ({
+          email: a.email,
+          name: a.name,
+          responseStatus: 'accepted' as const,
+        })),
+        isAllDay: false,
+        organizer,
+        location,
+        dialIn: meetingLink ? { raw: meetingLink, url: meetingLink, platform: 'other' as const } : undefined,
+      };
+      setContentHtml(buildNoteTemplate(event));
       setInitialized(true);
-    });
+    })();
   }, [eventId, provider, title, startTime, endTime, initialized]);
 
   // Auto-save draft every 30 seconds
@@ -120,9 +166,14 @@ export function App() {
     async (accountId: string, accountProvider: OAuthProvider, folderPath: string, driveId?: string, folderId?: string) => {
       setIsSaving(true);
       try {
-        const baseName = generateFileBaseName(title, startTime);
-        let fileName: string;
-        let mimeType: string;
+        // Build full document HTML (header + editor content)
+        const fullHtml = buildDocumentHtml(
+          title, startTime, endTime, organizer, attendees, meetingLink, contentHtml, attachments,
+        );
+
+        // Always generate both .md and .docx content
+        const mdContent = turndown.turndown(fullHtml);
+        const docxBase64 = await htmlToDocxBase64(fullHtml, title);
 
         const payload: Record<string, unknown> = {
           accountId,
@@ -134,42 +185,17 @@ export function App() {
           folderId,
           attachments: attachments.length > 0 ? attachments : undefined,
           calendarProvider: provider,
+          // Always send both formats — background saves both .md and .docx
+          contentText: mdContent,
+          contentBase64: docxBase64,
+          fileName: meetingBaseName,
         };
 
-        // Build the full document by prepending meeting header to editor content.
-        // The header (title, date, attendees, etc.) is displayed on screen by the
-        // MeetingHeader component but is NOT in the editor HTML, so we add it here.
-        const fullHtml = buildDocumentHtml(
-          title, startTime, endTime, organizer, attendees, meetingLink, contentHtml, attachments,
-        );
-
-        if (saveFormat === 'docx') {
-          const b64 = await htmlToDocxBase64(fullHtml, title);
-          fileName = `${baseName}.docx`;
-          mimeType = 'application/vnd.openxmlformats-officedocument.wordprocessingml.document';
-          payload.contentBase64 = b64;
-          payload.isBase64 = true;
-        } else if (saveFormat === 'html') {
-          fileName = `${baseName}.html`;
-          mimeType = 'text/html';
-          payload.contentText = fullHtml;
-        } else {
-          fileName = `${baseName}.md`;
-          mimeType = 'text/markdown';
-          payload.contentText = turndown.turndown(fullHtml);
-        }
-
-        payload.fileName = fileName;
-        payload.mimeType = mimeType;
-
         console.log('[MeetingScribe] Sending UPLOAD_NOTE:', {
-          fileName,
+          baseName: meetingBaseName,
           attachmentCount: attachments.length,
-          mimeType,
-          isBase64: !!payload.isBase64,
-          contentLength: payload.isBase64
-            ? (payload.contentBase64 as string).length
-            : (payload.contentText as string).length,
+          mdLength: mdContent.length,
+          docxLength: docxBase64.length,
         });
 
         const response = await chrome.runtime.sendMessage({

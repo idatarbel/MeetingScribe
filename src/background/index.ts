@@ -13,6 +13,7 @@ import type { CalendarEvent } from '@/types';
 import { fetchAllCalendarEvents } from '@/calendar';
 import { uploadNote } from '@/upload';
 import { downloadAttachment, uploadAttachmentBlob } from '@/upload/attachments';
+import { loadExistingNotes } from '@/upload/cloud-notes';
 import { findAccount } from '@/auth';
 import { STORAGE_KEYS, defaultSettings } from '@/types';
 import type { ExtensionSettings, EventAttachment } from '@/types';
@@ -58,6 +59,36 @@ chrome.runtime.onMessage.addListener(
       return true;
     }
 
+    if (message.type === 'LOAD_CLOUD_NOTES') {
+      const p = message.payload as {
+        accountId: string;
+        folderPath: string;
+        meetingBaseName: string;
+        driveId?: string;
+      };
+      (async () => {
+        const account = await findAccount(p.accountId);
+        if (!account) {
+          sendResponse({ ok: false, error: 'Account not found' });
+          return;
+        }
+        console.log(`[MeetingScribe] Loading cloud notes: ${p.meetingBaseName} from ${p.folderPath}`);
+        const mdContent = await loadExistingNotes(account, p.folderPath, p.meetingBaseName, p.driveId);
+        if (mdContent) {
+          console.log(`[MeetingScribe] Found existing notes (${mdContent.length} chars)`);
+          sendResponse({ ok: true, content: mdContent, found: true });
+        } else {
+          console.log('[MeetingScribe] No existing notes found in cloud');
+          sendResponse({ ok: true, content: null, found: false });
+        }
+      })().catch((err: unknown) => {
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error('[MeetingScribe] Load cloud notes failed:', msg);
+        sendResponse({ ok: false, error: msg });
+      });
+      return true;
+    }
+
     if (message.type === 'UPLOAD_NOTE') {
       const p = message.payload as {
         accountId: string;
@@ -76,35 +107,44 @@ chrome.runtime.onMessage.addListener(
         calendarProvider?: 'google' | 'microsoft';
       };
 
-      // Reconstruct content
-      let content: string;
-      if (p.isBase64 && p.contentBase64) {
-        content = atob(p.contentBase64);
-        console.log(`[MeetingScribe] UPLOAD_NOTE: docx binary, ${content.length} bytes`);
-      } else {
-        content = p.contentText ?? '';
-        console.log(`[MeetingScribe] UPLOAD_NOTE: text, ${content.length} chars`);
-      }
+      // The save payload now includes both .md content and .docx base64
+      const mdContent = p.contentText ?? '';
+      const docxBase64 = p.contentBase64 ?? '';
 
-      // Create a subfolder named after the meeting, then save notes + attachments inside
+      // Create a subfolder named after the meeting
       const baseFolder = p.folderPath ?? '/MeetingScribe';
-      const meetingFolderName = p.fileName.replace(/\.[^.]+$/, ''); // strip extension
-      const meetingFolderPath = `${baseFolder}/${meetingFolderName}`;
+      const meetingBaseName = p.fileName.replace(/\.[^.]+$/, ''); // strip extension
+      const meetingFolderPath = `${baseFolder}/${meetingBaseName}`;
 
       console.log(`[MeetingScribe] Uploading to folder: ${meetingFolderPath} via ${p.accountId}`);
 
       (async () => {
-        // 1. Upload the meeting minutes to the subfolder
+        // 1. Save .md file (editable source of truth — for cloud round-tripping)
         const dest = await uploadNote(
           p.accountId,
           meetingFolderPath,
-          p.fileName,
-          content,
-          p.mimeType ?? 'text/markdown',
+          `${meetingBaseName}.md`,
+          mdContent,
+          'text/markdown',
           p.driveId,
           p.folderId,
         );
-        console.log('[MeetingScribe] Meeting minutes saved:', dest.filePath);
+        console.log('[MeetingScribe] Markdown saved:', dest.filePath);
+
+        // 2. Save .docx file (presentation copy)
+        if (docxBase64) {
+          const docxContent = atob(docxBase64);
+          await uploadNote(
+            p.accountId,
+            meetingFolderPath,
+            `${meetingBaseName}.docx`,
+            docxContent,
+            'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+            p.driveId,
+            p.folderId,
+          );
+          console.log('[MeetingScribe] DOCX saved:', `${meetingBaseName}.docx`);
+        }
 
         // 2. Download and upload attachments (if any)
         const attachments = p.attachments ?? [];
