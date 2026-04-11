@@ -32,7 +32,8 @@
       "matches": [
         "https://outlook.office.com/*",
         "https://outlook.office365.com/*",
-        "https://outlook.live.com/*"
+        "https://outlook.live.com/*",
+        "https://outlook.cloud.microsoft/*"
       ],
       "js": ["src/content/outlook.ts"]
     }
@@ -41,7 +42,9 @@
     "identity",
     "storage",
     "alarms",
-    "notifications"
+    "notifications",
+    "scripting",
+    "tabs"
   ],
   "host_permissions": [
     "https://www.googleapis.com/*",
@@ -50,6 +53,10 @@
     "https://graph.microsoft.com/*",
     "https://api.dropboxapi.com/*",
     "https://content.dropboxapi.com/*",
-    "https://www.dropbox.com/*"
+    "https://www.dropbox.com/*",
+    "https://outlook.office.com/*",
+    "https://outlook.office365.com/*",
+    "https://outlook.live.com/*",
+    "https://outlook.cloud.microsoft/*"
   ]
 }

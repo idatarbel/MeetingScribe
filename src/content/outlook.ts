@@ -4,18 +4,10 @@
  * Watches for event detail views in Outlook Web (OWA) and injects a
  * "Take Notes" button. Uses MutationObserver to handle SPA navigation.
  *
- * Outlook Web app is a React SPA. The DOM structure differs between:
+ * Targets:
  * - outlook.office.com (M365 business)
- * - outlook.office365.com (M365 business, alternate domain)
+ * - outlook.office365.com (M365 business, alternate)
  * - outlook.live.com (personal Outlook/Hotmail)
- *
- * Common patterns (as of 2026):
- * - Event reading pane: div[role="main"] with subject heading
- * - Calendar event detail: .allowTextSelection with event info
- * - Event title: heading inside the event detail pane
- *
- * These selectors are fragile — Microsoft changes their DOM frequently.
- * We use multiple fallback selectors and fail gracefully.
  */
 
 import {
@@ -26,35 +18,42 @@ import {
   createDebouncedObserver,
 } from './shared';
 
-console.log('[MeetingScribe] Outlook Web content script loaded.');
+console.log('[MeetingScribe] Outlook Web content script loaded on:', window.location.href);
 
 // ---------------------------------------------------------------------------
-// Selectors
+// Selectors — Outlook Web 2026 DOM structure
+// The event detail panel appears as a side panel when clicking an event.
+// These selectors target various elements in the Fluent UI-based layout.
 // ---------------------------------------------------------------------------
 
 /** Selectors for the event detail / reading pane. */
 const EVENT_DETAIL_SELECTORS = [
-  '[data-app-section="CalendarReadingPane"]',  // OWA calendar reading pane
-  '.allowTextSelection',                        // Event detail area
-  '[role="main"] [data-testid="CalendarCard"]', // Calendar card view
-  '[role="complementary"]',                     // Side pane where event details appear
+  // New OWA: the event detail side panel
+  '[data-app-section="CalendarReadingPane"]',
+  '[data-app-section="ReadingPane"]',
+  // Fluent UI detail panel
+  '[role="complementary"][aria-label]',
+  // Generic: any panel that contains event-like content
+  '.ms-Panel-main',
+  '.event-details',
+  // Broad fallback: look for the event title pattern
+  '[class*="CalendarItemPeek"]',
+  '[class*="CalendarDetail"]',
+  '[class*="EventDetail"]',
 ];
 
 /** Selectors for the event title. */
 const EVENT_TITLE_SELECTORS = [
-  '[data-app-section="CalendarReadingPane"] [role="heading"]',
-  '.allowTextSelection h1',
-  '.allowTextSelection h2',
-  '[role="main"] [role="heading"][aria-level="1"]',
-  '[role="main"] [role="heading"][aria-level="2"]',
-];
-
-/** Selectors for where to inject the button. */
-const ACTION_AREA_SELECTORS = [
-  '[data-app-section="CalendarReadingPane"] [role="toolbar"]',
-  '.allowTextSelection [role="toolbar"]',
-  '[role="main"] [role="toolbar"]',
-  '[data-app-section="CalendarReadingPane"]', // fallback: append to reading pane
+  // Heading elements in the detail panel
+  '[role="complementary"] [role="heading"]',
+  '[role="complementary"] h1',
+  '[role="complementary"] h2',
+  '[data-app-section] [role="heading"]',
+  // Fluent UI heading styles
+  '[class*="subjectContainer"] [role="heading"]',
+  '[class*="SubjectLine"]',
+  // Broad: any heading-level element that's big and in the right area
+  '.ms-Panel-main [role="heading"]',
 ];
 
 // ---------------------------------------------------------------------------
@@ -68,11 +67,26 @@ function scanAndInject(): void {
     return;
   }
 
-  // Find the event detail container
+  // Find the event detail container using multiple strategies
   let eventDetail: Element | null = null;
   for (const selector of EVENT_DETAIL_SELECTORS) {
     eventDetail = document.querySelector(selector);
     if (eventDetail) break;
+  }
+
+  // Fallback: look for any element that has event-like content
+  // (title, time, organizer pattern in a side panel)
+  if (!eventDetail) {
+    // Try to find a complementary region (side panel)
+    const panels = document.querySelectorAll('[role="complementary"]');
+    for (const panel of panels) {
+      // Check if this panel has event-like content (time pattern, attendees, etc.)
+      const text = panel.textContent ?? '';
+      if (/\d{1,2}:\d{2}\s*(AM|PM)/i.test(text) && text.length > 50) {
+        eventDetail = panel;
+        break;
+      }
+    }
   }
 
   if (!eventDetail) {
@@ -90,21 +104,43 @@ function scanAndInject(): void {
     }
   }
 
-  // Extract event ID from URL or DOM
-  const eventId = extractOutlookEventId() ?? `outlook-${Date.now()}`;
-
-  // If our button already exists for THIS event, nothing to do.
-  if (isButtonInjectedForEvent(eventId)) return;
-  removeButton(); // remove stale button from previous event
-
-  // Find action area
-  let actionArea: Element | null = null;
-  for (const selector of ACTION_AREA_SELECTORS) {
-    actionArea = document.querySelector(selector);
-    if (actionArea) break;
+  // If no title found via selectors, try the first large text in the detail panel
+  if (title === '(No title)') {
+    const headings = eventDetail.querySelectorAll('h1, h2, [role="heading"], [class*="subject"], [class*="Subject"]');
+    for (const h of headings) {
+      const text = h.textContent?.trim();
+      if (text && text.length > 2 && text.length < 200) {
+        title = text;
+        break;
+      }
+    }
   }
 
-  if (!actionArea) return;
+  // Extract event ID from URL or generate one
+  const eventId = extractOutlookEventId() ?? `outlook-${sanitize(title)}-${Date.now()}`;
+
+  // Check if button already exists for this event
+  if (isButtonInjectedForEvent(eventId)) return;
+  removeButton();
+
+  // Find or create injection point — try toolbar first, then append to detail panel
+  let injectionPoint: Element | null = null;
+
+  // Try toolbar areas
+  const toolbarSelectors = [
+    '[role="complementary"] [role="toolbar"]',
+    '[data-app-section] [role="toolbar"]',
+    '.ms-CommandBar',
+  ];
+  for (const selector of toolbarSelectors) {
+    injectionPoint = document.querySelector(selector);
+    if (injectionPoint) break;
+  }
+
+  // Fallback: inject at the top of the detail panel itself
+  if (!injectionPoint) {
+    injectionPoint = eventDetail;
+  }
 
   const btn = createTakeNotesButton(() => {
     sendOpenNotesMessage({
@@ -114,27 +150,32 @@ function scanAndInject(): void {
     });
   }, eventId);
 
-  actionArea.appendChild(btn);
+  // Add some margin when appending to the detail panel
+  btn.style.margin = '8px 16px';
+
+  // Insert as first child if it's the detail panel (so button appears at top)
+  if (injectionPoint === eventDetail && eventDetail.firstChild) {
+    eventDetail.insertBefore(btn, eventDetail.firstChild);
+  } else {
+    injectionPoint.appendChild(btn);
+  }
+
+  console.log(`[MeetingScribe] Take Notes button injected for: "${title}"`);
 }
 
-/**
- * Check if the current Outlook Web view is a calendar view.
- * OWA URLs contain /calendar/ when in calendar mode.
- */
 function isCalendarView(): boolean {
   return /\/calendar\b/i.test(window.location.pathname);
 }
 
-/**
- * Try to extract a Microsoft event ID from the current URL.
- * OWA URLs may contain the event ID in various formats.
- */
 function extractOutlookEventId(): string | null {
-  // Pattern: /calendar/item/AAMk... or /calendar/view/.../id/AAMk...
   const match = window.location.href.match(
     /(?:\/item\/|\/id\/|itemId=)(AAMk[A-Za-z0-9_-]+)/,
   );
   return match?.[1] ?? null;
+}
+
+function sanitize(str: string): string {
+  return str.replace(/[^a-zA-Z0-9]/g, '').slice(0, 20);
 }
 
 // ---------------------------------------------------------------------------

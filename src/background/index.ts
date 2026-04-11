@@ -387,6 +387,9 @@ chrome.runtime.onInstalled.addListener(async (details) => {
       periodInMinutes: settings.calendarPollingIntervalMin,
     });
   }
+
+  // Inject Outlook content script into any already-open Outlook tabs
+  injectOutlookIntoExistingTabs();
 });
 
 // On startup, re-create the polling alarm
@@ -398,6 +401,251 @@ chrome.runtime.onStartup.addListener(async () => {
     });
   }
 });
+
+// ---------------------------------------------------------------------------
+// Programmatic content script injection for CSP-strict sites (Outlook)
+// crxjs's dynamic import() loader is blocked by Outlook's CSP.
+// We use chrome.scripting.executeScript() instead, which bypasses page CSP.
+// ---------------------------------------------------------------------------
+
+const OUTLOOK_PATTERNS = [
+  'https://outlook.office.com/*',
+  'https://outlook.office365.com/*',
+  'https://outlook.live.com/*',
+  'https://outlook.cloud.microsoft/*',
+];
+
+// Inject the Outlook content script when a matching tab updates.
+// Uses chrome.tabs.onUpdated + chrome.scripting.executeScript to inject
+// a simple inline script that bypasses Outlook's CSP entirely.
+chrome.tabs.onUpdated.addListener(async (tabId, changeInfo, tab) => {
+  if (changeInfo.status !== 'complete') return;
+  if (!tab.url) return;
+
+  const isOutlook = OUTLOOK_PATTERNS.some((p) => {
+    const domain = p.replace('https://', '').replace('/*', '');
+    return (tab.url ?? '').includes(domain);
+  });
+
+  if (!isOutlook) return;
+
+  try {
+    // Inject inline function that creates the Take Notes button.
+    // This bypasses CSP because chrome.scripting runs in the ISOLATED world.
+    await chrome.scripting.executeScript({
+      target: { tabId },
+      world: 'ISOLATED',
+      func: outlookContentScript,
+    });
+    console.log(`[MeetingScribe] Outlook content script injected into tab ${tabId}`);
+  } catch (err) {
+    console.log('[MeetingScribe] Outlook script injection skipped:', (err as Error).message);
+  }
+});
+
+/**
+ * Outlook content script — injected as inline function via chrome.scripting.
+ * Self-contained: no imports, no modules, no dynamic import().
+ */
+function outlookContentScript(): void {
+  // Prevent double injection
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if ((window as any).__meetingscribe_outlook_injected) return;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (window as any).__meetingscribe_outlook_injected = true;
+
+  console.log('[MeetingScribe] Outlook content script running (programmatic injection)');
+
+  const BTN_ID = 'meetingscribe-take-notes-btn';
+  let buttonPlaced = false;
+
+  function createButton(title: string): HTMLButtonElement {
+    const btn = document.createElement('button');
+    btn.id = BTN_ID;
+    btn.textContent = '\u{1F4DD} Take Notes';
+    btn.title = 'Open MeetingScribe to take notes on this meeting';
+    btn.dataset.eventTitle = title;
+    Object.assign(btn.style, {
+      display: 'inline-flex', alignItems: 'center', gap: '6px',
+      padding: '8px 16px', fontSize: '14px', fontWeight: '500',
+      fontFamily: '-apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif',
+      color: '#ffffff', backgroundColor: '#3b82f6', border: 'none',
+      borderRadius: '6px', cursor: 'pointer', lineHeight: '1',
+      whiteSpace: 'nowrap', transition: 'background-color 0.15s',
+      margin: '8px 16px', zIndex: '9999',
+    });
+    btn.addEventListener('mouseenter', () => { btn.style.backgroundColor = '#2563eb'; });
+    btn.addEventListener('mouseleave', () => { btn.style.backgroundColor = '#3b82f6'; });
+    btn.addEventListener('click', (e) => {
+      e.preventDefault();
+      e.stopPropagation();
+      try {
+        chrome.runtime.sendMessage({
+          type: 'OPEN_NOTES',
+          payload: { eventId: `outlook-${Date.now()}`, provider: 'microsoft', title },
+        }).catch(() => {
+          alert('MeetingScribe was updated. Please reload this page (F5) to reconnect.');
+        });
+      } catch {
+        alert('MeetingScribe was updated. Please reload this page (F5) to reconnect.');
+      }
+    });
+    return btn;
+  }
+
+  function scanAndInject(): void {
+    if (!/\/calendar\b/i.test(window.location.pathname)) {
+      document.getElementById(BTN_ID)?.remove();
+      return;
+    }
+
+    // Find the event detail panel by looking for data-app-section values
+    // that are NOT part of the standard calendar chrome (Ribbon, Surface, etc.)
+    let detailPanel: Element | null = null;
+    const chromeSections = new Set([
+      'Ribbon', 'CopilotDabRibbon', 'CalendarModule', 'CalendarSurfaceNavigationToolbar',
+      'CalendarModuleSurface', 'Surface_Week', 'Surface_Day', 'Surface_Month',
+      'Surface_WorkWeek', 'NotificationPane',
+    ]);
+    const allSections = document.querySelectorAll('[data-app-section]');
+    for (const section of allSections) {
+      const name = section.getAttribute('data-app-section') ?? '';
+      if (name && !chromeSections.has(name) && !name.startsWith('calendar-view')) {
+        // Check if this section has event-like content (time pattern)
+        const text = section.textContent ?? '';
+        if (/\d{1,2}:\d{2}\s*(AM|PM)/i.test(text) || /invited/i.test(text)) {
+          detailPanel = section;
+          break;
+        }
+      }
+    }
+
+    if (!detailPanel) {
+      document.getElementById('meetingscribe-shadow-host')?.remove();
+      buttonPlaced = false;
+      return;
+    }
+
+    // If already placed in shadow DOM, keep it
+    if (buttonPlaced && document.getElementById('meetingscribe-shadow-host')) return;
+
+    // Extract title from direct text nodes only (avoid "Join", "Chat" labels)
+    let title = '(No title)';
+    const candidates = detailPanel.querySelectorAll(
+      'div[class], span[class], h1, h2, [role="heading"]',
+    );
+    for (const el of candidates) {
+      if (el.id === BTN_ID) continue;
+      if (el.closest('button, a, [role="button"]')) continue;
+      let directText = '';
+      for (const child of el.childNodes) {
+        if (child.nodeType === Node.TEXT_NODE) {
+          directText += child.textContent ?? '';
+        }
+      }
+      directText = directText.trim();
+      if (directText.length >= 3 && directText.length <= 150 &&
+          !/^\d{1,2}[:/]\d{2}/.test(directText) &&
+          !/^(Accepted|Declined|invited|Join|Chat|Respond)/i.test(directText) &&
+          !directText.includes('Take Notes')) {
+        title = directText;
+        break;
+      }
+    }
+
+    if (title === '(No title)') return;
+
+    // Use a Shadow DOM host so Outlook can't find or remove our button.
+    // Outlook aggressively cleans unknown elements from document.body.
+    let host = document.getElementById('meetingscribe-shadow-host') as HTMLDivElement | null;
+    let shadow: ShadowRoot;
+
+    if (host) {
+      // Host exists — reuse its shadow root
+      shadow = host.shadowRoot as ShadowRoot;
+      if (!shadow) {
+        // Shouldn't happen but safety fallback — remove and recreate
+        host.remove();
+        host = null;
+      }
+    }
+
+    if (!host) {
+      host = document.createElement('div');
+      host.id = 'meetingscribe-shadow-host';
+      host.style.cssText = 'position:fixed;top:60px;right:20px;z-index:2147483647;';
+      shadow = host.attachShadow({ mode: 'open' }); // 'open' so we can access shadowRoot later
+      document.documentElement.appendChild(host);
+    }
+
+    shadow = host.shadowRoot as ShadowRoot;
+    // Clear previous content
+    shadow.innerHTML = '';
+
+    const btn = createButton(title);
+    btn.style.position = 'relative';
+    btn.style.top = 'auto';
+    btn.style.right = 'auto';
+    btn.style.margin = '0';
+    btn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
+    shadow.appendChild(btn);
+    buttonPlaced = true;
+    console.log(`[MeetingScribe] Take Notes button injected for: "${title}" (shadow DOM)`);
+  }
+
+  // Wait for calendar view to load, then inject once
+  function waitAndInject(): void {
+    if (buttonPlaced) return;
+    if (!/\/calendar\b/i.test(window.location.pathname)) {
+      setTimeout(waitAndInject, 2000);
+      return;
+    }
+    scanAndInject();
+    if (!buttonPlaced) {
+      setTimeout(waitAndInject, 2000);
+    }
+  }
+  waitAndInject();
+
+  // SPA navigation: if user leaves calendar view, remove button
+  let lastUrl = location.href;
+  setInterval(() => {
+    if (location.href !== lastUrl) {
+      lastUrl = location.href;
+      document.getElementById(BTN_ID)?.remove();
+    }
+  }, 1000);
+}
+
+async function injectOutlookIntoExistingTabs(): Promise<void> {
+  try {
+    // Query ALL tabs and filter manually — chrome.tabs.query URL patterns
+    // may not handle domains without standard TLDs (e.g., outlook.cloud.microsoft)
+    const allTabs = await chrome.tabs.query({});
+    const tabs = allTabs.filter((t) =>
+      t.url && OUTLOOK_PATTERNS.some((p) => {
+        const domain = p.replace('https://', '').replace('/*', '');
+        return t.url?.includes(domain);
+      }),
+    );
+    console.log(`[MeetingScribe] Found ${tabs.length} existing Outlook tabs (scanned ${allTabs.length} total)`);
+    for (const tab of tabs) {
+      if (!tab.id) continue;
+      try {
+        await chrome.scripting.executeScript({
+          target: { tabId: tab.id },
+          world: 'ISOLATED',
+          func: outlookContentScript,
+        });
+        console.log(`[MeetingScribe] Injected into existing Outlook tab ${tab.id}: ${tab.url}`);
+      } catch (err) {
+        console.log('[MeetingScribe] Injection into existing tab failed:', (err as Error).message);
+      }
+    }
+  } catch (err) {
+    console.error('[MeetingScribe] Failed to query tabs:', err);
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Settings helper

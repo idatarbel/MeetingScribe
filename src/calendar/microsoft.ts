@@ -39,7 +39,7 @@ export async function fetchMicrosoftCalendarEvents(
     $top: String(maxResults),
     $orderby: 'start/dateTime',
     $select:
-      'id,subject,start,end,location,body,attendees,organizer,onlineMeeting,isAllDay',
+      'id,subject,start,end,location,body,attendees,organizer,onlineMeeting,isAllDay,hasAttachments',
   });
 
   const url = `${GRAPH_API_BASE}/me/calendarView?${params.toString()}`;
@@ -60,7 +60,11 @@ export async function fetchMicrosoftCalendarEvents(
 
   const data = (await response.json()) as MicrosoftCalendarResponse;
 
-  return (data.value ?? []).map((item) => mapMicrosoftEvent(item, account.email));
+  // Map events and fetch attachments for events that have them
+  const events = await Promise.all(
+    (data.value ?? []).map((item) => mapMicrosoftEvent(item, account.email, accessToken)),
+  );
+  return events;
 }
 
 // ---------------------------------------------------------------------------
@@ -96,16 +100,18 @@ interface MicrosoftCalendarItem {
     joinUrl?: string;
   };
   isAllDay?: boolean;
+  hasAttachments?: boolean;
 }
 
 // ---------------------------------------------------------------------------
 // Mapping
 // ---------------------------------------------------------------------------
 
-function mapMicrosoftEvent(
+async function mapMicrosoftEvent(
   item: MicrosoftCalendarItem,
   accountEmail: string,
-): CalendarEvent {
+  accessToken: string,
+): Promise<CalendarEvent> {
   const startTime = item.start?.dateTime
     ? ensureIso(item.start.dateTime)
     : new Date().toISOString();
@@ -118,6 +124,12 @@ function mapMicrosoftEvent(
   const dialIn = joinUrl
     ? { raw: joinUrl, platform: detectPlatform(joinUrl), url: joinUrl }
     : extractDialIn(item.body?.content, item.location?.displayName);
+
+  // Fetch attachments if the event has them
+  let attachments: CalendarEvent['attachments'];
+  if (item.hasAttachments) {
+    attachments = await fetchMicrosoftEventAttachments(item.id, accessToken);
+  }
 
   return {
     id: item.id,
@@ -136,7 +148,49 @@ function mapMicrosoftEvent(
     description: item.body?.content,
     isAllDay: item.isAllDay ?? false,
     organizer: item.organizer?.emailAddress.address,
+    attachments,
   };
+}
+
+/**
+ * Fetch attachments for a specific Microsoft calendar event.
+ * Returns metadata + base64 content for file attachments.
+ */
+async function fetchMicrosoftEventAttachments(
+  eventId: string,
+  accessToken: string,
+): Promise<CalendarEvent['attachments']> {
+  try {
+    const url = `${GRAPH_API_BASE}/me/events/${eventId}/attachments?$select=id,name,contentType,size,contentBytes`;
+    const response = await fetch(url, {
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+
+    if (!response.ok) return [];
+
+    const data = (await response.json()) as {
+      value?: Array<{
+        '@odata.type': string;
+        id: string;
+        name: string;
+        contentType: string;
+        size: number;
+        contentBytes?: string; // base64
+      }>;
+    };
+
+    return (data.value ?? [])
+      .filter((att) => att['@odata.type'] === '#microsoft.graph.fileAttachment' && att.contentBytes)
+      .map((att) => ({
+        fileId: att.id,
+        title: att.name,
+        mimeType: att.contentType,
+        contentBase64: att.contentBytes,
+      }));
+  } catch (err) {
+    console.error('[MeetingScribe] Failed to fetch Outlook attachments:', err);
+    return [];
+  }
 }
 
 /**

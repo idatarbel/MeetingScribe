@@ -41,7 +41,7 @@ function getRedirectUrl(): string {
 function getScopes(): string {
   return (
     (import.meta.env.VITE_GOOGLE_OAUTH_SCOPES as string | undefined) ??
-    'openid email profile https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.file'
+    'openid email profile https://www.googleapis.com/auth/calendar.readonly https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/drive.readonly'
   );
 }
 
