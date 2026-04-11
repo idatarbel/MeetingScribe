@@ -27,13 +27,7 @@ const EVENT_POPUP_SELECTORS = [
   '.ecHOke',
 ];
 
-const ACTION_AREA_SELECTORS = [
-  '[role="dialog"] [data-eventid]',
-  '[data-eventid] [data-tooltip]',
-  '.pPTZAe',
-  '[role="dialog"]',
-  '[data-eventid]',
-];
+// Action area selectors removed — button injection now targets the toolbar directly
 
 // ---------------------------------------------------------------------------
 // Metadata extraction from Google Calendar DOM
@@ -116,21 +110,28 @@ function extractEventMetadata(container: Element): {
     /(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})\s*(am|pm)?/i,
   ];
 
+  const currentYear = new Date().getFullYear();
   for (const pattern of timePatterns) {
     const match = popupText.match(pattern);
     if (match) {
-      // Try to parse a full date+time
       try {
         if (match[1] && match[2] && match[3]) {
-          // Full date pattern
-          const dateStr = match[1].replace(/^\w+,?\s*/, ''); // remove day name
+          let dateStr = match[1].replace(/^\w+,?\s*/, ''); // remove day name
+          // Add current year if no year in the date string
+          if (!/\d{4}/.test(dateStr)) {
+            dateStr = `${dateStr}, ${currentYear}`;
+          }
           const ampm = match[4] ?? 'AM';
           const startStr = `${dateStr} ${match[2]} ${ampm}`;
           const endStr = `${dateStr} ${match[3]} ${ampm}`;
           const startParsed = new Date(startStr);
           const endParsed = new Date(endStr);
-          if (!isNaN(startParsed.getTime())) meta.startTime = startParsed.toISOString();
-          if (!isNaN(endParsed.getTime())) meta.endTime = endParsed.toISOString();
+          if (!isNaN(startParsed.getTime()) && startParsed.getFullYear() > 2020) {
+            meta.startTime = startParsed.toISOString();
+          }
+          if (!isNaN(endParsed.getTime()) && endParsed.getFullYear() > 2020) {
+            meta.endTime = endParsed.toISOString();
+          }
         }
       } catch { /* ignore parse errors */ }
       break;
@@ -216,15 +217,6 @@ function scanAndInject(): void {
   // Extract metadata directly from the DOM
   const meta = extractEventMetadata(eventContainer);
 
-  // Find where to inject the button
-  let actionArea: Element | null = null;
-  for (const selector of ACTION_AREA_SELECTORS) {
-    actionArea = document.querySelector(selector);
-    if (actionArea) break;
-  }
-
-  if (!actionArea) return;
-
   const btn = createTakeNotesButton(() => {
     sendOpenNotesMessage({
       eventId,
@@ -238,8 +230,22 @@ function scanAndInject(): void {
     });
   }, eventId);
 
-  const parent = actionArea.parentElement ?? actionArea;
-  parent.appendChild(btn);
+  // Find the toolbar area at the top of the dialog (where Close/Edit/Delete buttons are)
+  // The toolbar buttons typically have [data-tooltip] attributes
+  const toolbarButtons = eventContainer.querySelectorAll('[data-tooltip]');
+  if (toolbarButtons.length > 0) {
+    // Insert after the last toolbar button
+    const lastButton = toolbarButtons[toolbarButtons.length - 1];
+    const toolbar = lastButton?.parentElement;
+    if (toolbar) {
+      btn.style.marginLeft = '8px';
+      toolbar.appendChild(btn);
+      return;
+    }
+  }
+
+  // Fallback: append to the event container
+  eventContainer.appendChild(btn);
 }
 
 function extractEventIdFromUrl(): string | null {
