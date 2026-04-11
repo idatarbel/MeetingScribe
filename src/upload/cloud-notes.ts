@@ -58,18 +58,27 @@ async function loadFromGoogleDrive(
     const accessToken = await getAccessToken(account.id);
 
     // Resolve the folder to find the file
+    console.log(`[MeetingScribe] Google Drive: resolving folder "${folderPath}"`);
     const folderId = await resolveGoogleFolder(accessToken, folderPath);
-    if (!folderId) return null;
+    if (!folderId) {
+      console.log('[MeetingScribe] Google Drive: folder not found');
+      return null;
+    }
+    console.log(`[MeetingScribe] Google Drive: folder resolved to ${folderId}`);
 
-    // Search for the file by name in the folder
+    // Search for the file by name — escape single quotes in filename
+    const escapedName = fileName.replace(/'/g, "\\'");
     const q = encodeURIComponent(
-      `name='${fileName}' and '${folderId}' in parents and trashed=false`,
+      `name='${escapedName}' and '${folderId}' in parents and trashed=false`,
     );
-    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`;
+    const searchUrl = `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id,name)`;
     const searchResp = await fetch(searchUrl, {
       headers: { Authorization: `Bearer ${accessToken}` },
     });
-    if (!searchResp.ok) return null;
+    if (!searchResp.ok) {
+      console.log(`[MeetingScribe] Google Drive: file search failed (${searchResp.status})`);
+      return null;
+    }
 
     const searchData = (await searchResp.json()) as { files?: Array<{ id: string }> };
     const fileId = searchData.files?.[0]?.id;
@@ -93,17 +102,24 @@ async function resolveGoogleFolder(accessToken: string, path: string): Promise<s
   const parts = path.split('/').filter((p) => p.length > 0);
   let parentId = 'root';
   for (const name of parts) {
+    const escapedName = name.replace(/'/g, "\\'");
     const q = encodeURIComponent(
-      `name='${name}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
+      `name='${escapedName}' and '${parentId}' in parents and mimeType='application/vnd.google-apps.folder' and trashed=false`,
     );
     const resp = await fetch(
       `https://www.googleapis.com/drive/v3/files?q=${q}&fields=files(id)`,
       { headers: { Authorization: `Bearer ${accessToken}` } },
     );
-    if (!resp.ok) return null;
+    if (!resp.ok) {
+      console.log(`[MeetingScribe] Google Drive: folder lookup failed for "${name}" (${resp.status})`);
+      return null;
+    }
     const data = (await resp.json()) as { files?: Array<{ id: string }> };
     const found = data.files?.[0]?.id;
-    if (!found) return null;
+    if (!found) {
+      console.log(`[MeetingScribe] Google Drive: folder "${name}" not found in parent ${parentId}`);
+      return null;
+    }
     parentId = found;
   }
   return parentId;

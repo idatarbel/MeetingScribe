@@ -1,15 +1,16 @@
 /**
  * MeetingScribe — Options page.
  *
- * Three sections: Connected Accounts, Routing Rules, General Settings.
+ * Four sections: Connected Accounts, Routing Rules, Notes Template, General Settings.
  */
 
 import { useState } from 'react';
 import { ConnectedAccounts } from './components/ConnectedAccounts';
 import { RoutingRules } from './components/RoutingRules';
+import { NotesTemplate } from './components/NotesTemplate';
 import { GeneralSettings } from './components/GeneralSettings';
 
-type Tab = 'accounts' | 'routing' | 'settings';
+type Tab = 'accounts' | 'routing' | 'template' | 'settings';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('accounts');
@@ -25,40 +26,22 @@ export function App() {
 
       {/* Tab navigation */}
       <nav className="flex gap-1 border-b border-surface-bright mb-6">
-        <TabButton
-          label="Accounts"
-          active={activeTab === 'accounts'}
-          onClick={() => setActiveTab('accounts')}
-        />
-        <TabButton
-          label="Routing Rules"
-          active={activeTab === 'routing'}
-          onClick={() => setActiveTab('routing')}
-        />
-        <TabButton
-          label="General"
-          active={activeTab === 'settings'}
-          onClick={() => setActiveTab('settings')}
-        />
+        <TabButton label="Accounts" active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} />
+        <TabButton label="Routing Rules" active={activeTab === 'routing'} onClick={() => setActiveTab('routing')} />
+        <TabButton label="Notes Template" active={activeTab === 'template'} onClick={() => setActiveTab('template')} />
+        <TabButton label="General" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
       </nav>
 
       {/* Tab content */}
       {activeTab === 'accounts' && <ConnectedAccounts />}
       {activeTab === 'routing' && <RoutingRules />}
+      {activeTab === 'template' && <NotesTemplate />}
       {activeTab === 'settings' && <GeneralSettings />}
     </div>
   );
 }
 
-function TabButton({
-  label,
-  active,
-  onClick,
-}: {
-  label: string;
-  active: boolean;
-  onClick: () => void;
-}) {
+function TabButton({ label, active, onClick }: { label: string; active: boolean; onClick: () => void }) {
   return (
     <button
       type="button"

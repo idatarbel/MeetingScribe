@@ -228,6 +228,8 @@ export interface ExtensionSettings {
   calendarPollingIntervalMin: number;
   /** Default note format for new notes. */
   defaultNoteFormat: NoteFormat;
+  /** Custom HTML template for new notes. If empty, uses the default template. */
+  noteTemplate: string;
 }
 
 export function defaultSettings(): ExtensionSettings {
@@ -239,6 +241,7 @@ export function defaultSettings(): ExtensionSettings {
     calendarPollingEnabled: true,
     calendarPollingIntervalMin: 10,
     defaultNoteFormat: 'markdown',
+    noteTemplate: '',
   };
 }
 

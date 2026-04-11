@@ -32,7 +32,7 @@ export function App() {
   const startTime = params.get('startTime') ?? undefined;
   const endTime = params.get('endTime') ?? undefined;
   const organizer = params.get('organizer') ?? undefined;
-  const location = params.get('location') ?? undefined;
+  // const location = params.get('location') ?? undefined; // available for future use
   const meetingLink = params.get('meetingLink') ?? undefined;
   const attendeesRaw = params.get('attendees');
   const attendees: Array<{ name?: string; email: string }> = attendeesRaw
@@ -122,25 +122,24 @@ export function App() {
         return;
       }
 
-      // 3. Fresh template from event metadata
-      const event: CalendarEvent = {
-        id: eventId,
-        provider,
-        accountEmail: '',
-        title,
-        startTime: startTime ?? new Date().toISOString(),
-        endTime: endTime ?? new Date().toISOString(),
-        attendees: attendees.map((a) => ({
-          email: a.email,
-          name: a.name,
-          responseStatus: 'accepted' as const,
-        })),
-        isAllDay: false,
-        organizer,
-        location,
-        dialIn: meetingLink ? { raw: meetingLink, url: meetingLink, platform: 'other' as const } : undefined,
-      };
-      setContentHtml(buildNoteTemplate(event));
+      // 3. Fresh template — use custom template from settings if available
+      const settingsForTemplate = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+      const currentSettings = (settingsForTemplate[STORAGE_KEYS.SETTINGS] as import('@/types').ExtensionSettings) ?? null;
+      if (currentSettings?.noteTemplate) {
+        setContentHtml(currentSettings.noteTemplate);
+      } else {
+        const event: CalendarEvent = {
+          id: eventId,
+          provider,
+          accountEmail: '',
+          title,
+          startTime: startTime ?? new Date().toISOString(),
+          endTime: endTime ?? new Date().toISOString(),
+          attendees: [],
+          isAllDay: false,
+        };
+        setContentHtml(buildNoteTemplate(event));
+      }
       setInitialized(true);
     })();
   }, [eventId, provider, title, startTime, endTime, initialized]);
