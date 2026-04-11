@@ -26,7 +26,7 @@ export function buildNoteTemplate(_event: CalendarEvent): string {
   parts.push('<ul><li></li></ul>');
 
   parts.push('<h2>Notes</h2>');
-  parts.push('<p></p>');
+  parts.push('<ul><li></li></ul>');
 
   parts.push('<h2>Action Items</h2>');
   parts.push('<ul><li></li></ul>');

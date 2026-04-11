@@ -18,7 +18,7 @@ import { STORAGE_KEYS, defaultSettings } from '@/types';
 const DEFAULT_TEMPLATE = `<h2>Agenda</h2>
 <ul><li></li></ul>
 <h2>Notes</h2>
-<p></p>
+<ul><li></li></ul>
 <h2>Action Items</h2>
 <ul><li></li></ul>`;
 
