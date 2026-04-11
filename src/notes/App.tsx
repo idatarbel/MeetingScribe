@@ -166,13 +166,15 @@ export function App() {
     async (accountId: string, accountProvider: OAuthProvider, folderPath: string, driveId?: string, folderId?: string) => {
       setIsSaving(true);
       try {
-        // Build full document HTML (header + editor content)
+        // .md file: editor content ONLY (no header) — this is the round-trip format.
+        // The header is added by MeetingHeader on-screen and by buildDocumentHtml for .docx.
+        // Saving only editor content prevents header duplication on save→load→save cycles.
+        const mdContent = turndown.turndown(contentHtml);
+
+        // .docx file: full document with header (title, date, attendees, etc.)
         const fullHtml = buildDocumentHtml(
           title, startTime, endTime, organizer, attendees, meetingLink, contentHtml, attachments,
         );
-
-        // Always generate both .md and .docx content
-        const mdContent = turndown.turndown(fullHtml);
         const docxBase64 = await htmlToDocxBase64(fullHtml, title);
 
         const payload: Record<string, unknown> = {

@@ -626,16 +626,16 @@ function outlookContentScript(): void {
       } catch { /* ignore parse errors */ }
     }
 
-    // Extract organizer: "Sarah Khan invited you" or "Organizer: ..."
+    // Extract organizer: "Sarah Khan invited you" — match only name-like text before "invited"
     let outlookOrganizer: string | undefined;
-    const orgMatch = panelText.match(/(.+?)\s+invited you/i);
+    const orgMatch = panelText.match(/([A-Z][a-zA-Z'.'-]+(?:\s+[A-Z][a-zA-Z'.'-]+)*)\s+invited you/);
     if (orgMatch) {
       outlookOrganizer = orgMatch[1]?.trim();
     }
 
-    // Extract meeting link: any URL in the panel text
+    // Extract meeting link: URL starting with https
     let outlookMeetingLink: string | undefined;
-    const linkMatch = panelText.match(/(https?:\/\/\S+)/);
+    const linkMatch = panelText.match(/(https?:\/\/[^\s<>"']+)/);
     if (linkMatch) {
       outlookMeetingLink = linkMatch[1];
     }
