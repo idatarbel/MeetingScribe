@@ -28,7 +28,9 @@
     "@tiptap/react": "^2.27.2",
     "@tiptap/starter-kit": "^2.27.2",
     "docx": "^9.6.1",
+    "docxtemplater": "^3.68.4",
     "marked": "^18.0.0",
+    "pizzip": "^3.2.0",
     "react": "^18.3.1",
     "react-dom": "^18.3.1",
     "turndown": "^7.2.4"
@@ -40,6 +42,7 @@
     "@testing-library/react": "^16.3.2",
     "@types/chrome": "^0.1.40",
     "@types/node": "^25.6.0",
+    "@types/pizzip": "^3.0.5",
     "@types/react": "^18.3.28",
     "@types/react-dom": "^18.3.7",
     "@types/turndown": "^5.0.6",

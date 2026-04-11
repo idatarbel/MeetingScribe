@@ -12,9 +12,10 @@ import { SaveButton } from './components/SaveButton';
 import { WordCount } from './components/WordCount';
 import { buildNoteTemplate } from '@/utils/note-template';
 import { htmlToDocxBase64 } from '@/utils/docx-export';
+import { mergeTemplate } from '@/utils/docx-template';
 import { marked } from 'marked';
-import type { CalendarEvent, OAuthProvider, NoteDraft, NoteFormat } from '@/types';
-import { STORAGE_KEYS } from '@/types';
+import type { CalendarEvent, OAuthProvider, NoteDraft, NoteFormat, ExtensionSettings } from '@/types';
+import { STORAGE_KEYS, defaultSettings } from '@/types';
 import TurndownService from 'turndown';
 
 const turndown = new TurndownService({
@@ -170,11 +171,30 @@ export function App() {
         // Saving only editor content prevents header duplication on save→load→save cycles.
         const mdContent = turndown.turndown(contentHtml);
 
-        // .docx file: full document with header (title, date, attendees, etc.)
-        const fullHtml = buildDocumentHtml(
-          title, startTime, endTime, organizer, attendees, meetingLink, contentHtml, attachments,
-        );
-        const docxBase64 = await htmlToDocxBase64(fullHtml, title);
+        // .docx file: check if user has a custom template, otherwise use built-in
+        const settingsForDocx = await chrome.storage.local.get(STORAGE_KEYS.SETTINGS);
+        const docxSettings = (settingsForDocx[STORAGE_KEYS.SETTINGS] as ExtensionSettings) ?? defaultSettings();
+        let docxBase64: string;
+
+        if (docxSettings.docxTemplateBase64) {
+          // Merge into user's custom .docx template
+          console.log('[MeetingScribe] Using custom .docx template:', docxSettings.docxTemplateName);
+          docxBase64 = mergeTemplate(docxSettings.docxTemplateBase64, {
+            meetingTitle: title,
+            startTime,
+            endTime,
+            organizer,
+            attendees,
+            meetingLink,
+            contentHtml,
+          });
+        } else {
+          // Built-in: generate from HTML with full header
+          const fullHtml = buildDocumentHtml(
+            title, startTime, endTime, organizer, attendees, meetingLink, contentHtml, attachments,
+          );
+          docxBase64 = await htmlToDocxBase64(fullHtml, title);
+        }
 
         const payload: Record<string, unknown> = {
           accountId,

@@ -8,9 +8,10 @@ import { useState } from 'react';
 import { ConnectedAccounts } from './components/ConnectedAccounts';
 import { RoutingRules } from './components/RoutingRules';
 import { NotesTemplate } from './components/NotesTemplate';
+import { DocumentTemplates } from './components/DocumentTemplates';
 import { GeneralSettings } from './components/GeneralSettings';
 
-type Tab = 'accounts' | 'routing' | 'template' | 'settings';
+type Tab = 'accounts' | 'routing' | 'template' | 'doctemplate' | 'settings';
 
 export function App() {
   const [activeTab, setActiveTab] = useState<Tab>('accounts');
@@ -29,6 +30,7 @@ export function App() {
         <TabButton label="Accounts" active={activeTab === 'accounts'} onClick={() => setActiveTab('accounts')} />
         <TabButton label="Routing Rules" active={activeTab === 'routing'} onClick={() => setActiveTab('routing')} />
         <TabButton label="Notes Template" active={activeTab === 'template'} onClick={() => setActiveTab('template')} />
+        <TabButton label="Doc Template" active={activeTab === 'doctemplate'} onClick={() => setActiveTab('doctemplate')} />
         <TabButton label="General" active={activeTab === 'settings'} onClick={() => setActiveTab('settings')} />
       </nav>
 
@@ -36,6 +38,7 @@ export function App() {
       {activeTab === 'accounts' && <ConnectedAccounts />}
       {activeTab === 'routing' && <RoutingRules />}
       {activeTab === 'template' && <NotesTemplate />}
+      {activeTab === 'doctemplate' && <DocumentTemplates />}
       {activeTab === 'settings' && <GeneralSettings />}
     </div>
   );

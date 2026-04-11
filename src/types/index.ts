@@ -230,6 +230,10 @@ export interface ExtensionSettings {
   defaultNoteFormat: NoteFormat;
   /** Custom HTML template for new notes. If empty, uses the default template. */
   noteTemplate: string;
+  /** User-uploaded .docx template as base64. If empty, uses built-in docx generation. */
+  docxTemplateBase64: string;
+  /** Original filename of the uploaded .docx template (for display). */
+  docxTemplateName: string;
 }
 
 export function defaultSettings(): ExtensionSettings {
@@ -242,6 +246,8 @@ export function defaultSettings(): ExtensionSettings {
     calendarPollingIntervalMin: 10,
     defaultNoteFormat: 'markdown',
     noteTemplate: '',
+    docxTemplateBase64: '',
+    docxTemplateName: '',
   };
 }
 
