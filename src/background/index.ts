@@ -123,7 +123,7 @@ chrome.runtime.onMessage.addListener(
         const dest = await uploadNote(
           p.accountId,
           meetingFolderPath,
-          `${meetingBaseName}.md`,
+          `${meetingBaseName}.lock`,
           mdContent,
           'text/markdown',
           p.driveId,

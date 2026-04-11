@@ -31,7 +31,7 @@ export async function loadExistingNotes(
   meetingBaseName: string,
   driveId?: string,
 ): Promise<string | null> {
-  const mdFileName = `${meetingBaseName}.md`;
+  const mdFileName = `${meetingBaseName}.lock`;
 
   switch (account.provider) {
     case 'google':
