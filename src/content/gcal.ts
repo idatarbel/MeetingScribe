@@ -230,15 +230,12 @@ function scanAndInject(): void {
     });
   }, eventId);
 
-  // Position the button as a fixed overlay near the top-right of the dialog popup.
-  // Don't insert into Google Calendar's DOM (fragile) — float above it.
-  const dialogRect = eventContainer.getBoundingClientRect();
-  btn.style.position = 'fixed';
-  btn.style.top = `${dialogRect.top + 8}px`;
-  btn.style.left = `${dialogRect.right - 130}px`;
-  btn.style.zIndex = '99999';
-  btn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)';
-  document.documentElement.appendChild(btn);
+  // Inject into the event detail area inside the dialog — the original working approach.
+  // Find the [data-eventid] element inside the dialog and append there.
+  const eventArea =
+    eventContainer.querySelector('[data-eventid]') ?? eventContainer;
+  const parent = eventArea.parentElement ?? eventArea;
+  parent.appendChild(btn);
 }
 
 function extractEventIdFromUrl(): string | null {
