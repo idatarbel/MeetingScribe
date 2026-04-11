@@ -10,7 +10,7 @@ import {
   Paragraph,
   TextRun,
   HeadingLevel,
-  AlignmentType,
+  // AlignmentType removed — no longer used after HR fix
   Packer,
   ExternalHyperlink,
   ImageRun,
@@ -124,15 +124,11 @@ function nodeToDocxParagraphs(node: Node): Paragraph[] {
     case 'hr':
       return [
         new Paragraph({
-          children: [
-            new TextRun({
-              text: '────────────────────────────────────────',
-              color: 'cccccc',
-              size: 16,
-            }),
-          ],
+          children: [],
           spacing: { before: 200, after: 200 },
-          alignment: AlignmentType.CENTER,
+          border: {
+            bottom: { style: 'single' as const, size: 6, color: 'cccccc', space: 1 },
+          },
         }),
       ];
     case 'pre':
