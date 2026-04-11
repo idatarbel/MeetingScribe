@@ -269,7 +269,11 @@ async function handleOpenNotes(payload: {
   const params = new URLSearchParams({
     eventId: payload.eventId,
     provider: payload.provider,
-    title: fullEvent?.title ?? payload.title,
+    // Always prefer the content script's title (what the user sees in the calendar UI).
+    // The API may return a shorter/different title (e.g., "IconicChat" vs "IconicChat Team Meeting").
+    title: payload.title.length >= (fullEvent?.title ?? '').length
+      ? payload.title
+      : (fullEvent?.title ?? payload.title),
   });
 
   const startTime = fullEvent?.startTime ?? payload.startTime;
