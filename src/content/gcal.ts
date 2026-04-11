@@ -230,22 +230,15 @@ function scanAndInject(): void {
     });
   }, eventId);
 
-  // Find the toolbar area at the top of the dialog (where Close/Edit/Delete buttons are)
-  // The toolbar buttons typically have [data-tooltip] attributes
-  const toolbarButtons = eventContainer.querySelectorAll('[data-tooltip]');
-  if (toolbarButtons.length > 0) {
-    // Insert after the last toolbar button
-    const lastButton = toolbarButtons[toolbarButtons.length - 1];
-    const toolbar = lastButton?.parentElement;
-    if (toolbar) {
-      btn.style.marginLeft = '8px';
-      toolbar.appendChild(btn);
-      return;
-    }
-  }
-
-  // Fallback: append to the event container
-  eventContainer.appendChild(btn);
+  // Position the button as a fixed overlay near the top-right of the dialog popup.
+  // Don't insert into Google Calendar's DOM (fragile) — float above it.
+  const dialogRect = eventContainer.getBoundingClientRect();
+  btn.style.position = 'fixed';
+  btn.style.top = `${dialogRect.top + 8}px`;
+  btn.style.left = `${dialogRect.right - 130}px`;
+  btn.style.zIndex = '99999';
+  btn.style.boxShadow = '0 2px 6px rgba(0,0,0,0.15)';
+  document.documentElement.appendChild(btn);
 }
 
 function extractEventIdFromUrl(): string | null {
