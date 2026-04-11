@@ -628,7 +628,9 @@ function outlookContentScript(): void {
 
     // Extract organizer: "Sarah Khan invited you" — match only name-like text before "invited"
     let outlookOrganizer: string | undefined;
-    const orgMatch = panelText.match(/([A-Z][a-zA-Z'.'-]+(?:\s+[A-Z][a-zA-Z'.'-]+)*)\s+invited you/);
+    // Match properly capitalized names: "Sarah Khan invited you"
+    // Each word must start uppercase + have lowercase letters (rejects "PM", "SK", etc.)
+    const orgMatch = panelText.match(/([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)\s+invited you/);
     if (orgMatch) {
       outlookOrganizer = orgMatch[1]?.trim();
     }
