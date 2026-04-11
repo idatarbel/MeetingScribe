@@ -497,9 +497,9 @@ function outlookContentScript(): void {
   console.log('[MeetingScribe] Outlook content script running (programmatic injection)');
 
   const BTN_ID = 'meetingscribe-take-notes-btn';
-  let buttonPlaced = false;
+  let currentMeetingTitle = '';
 
-  function createButton(title: string): HTMLButtonElement {
+  function createButton(title: string, startTime?: string): HTMLButtonElement {
     const btn = document.createElement('button');
     btn.id = BTN_ID;
     btn.textContent = '\u{1F4DD} Take Notes';
@@ -522,7 +522,7 @@ function outlookContentScript(): void {
       try {
         chrome.runtime.sendMessage({
           type: 'OPEN_NOTES',
-          payload: { eventId: `outlook-${Date.now()}`, provider: 'microsoft', title },
+          payload: { eventId: `outlook-${Date.now()}`, provider: 'microsoft', title, startTime },
         }).catch(() => {
           alert('MeetingScribe was updated. Please reload this page (F5) to reconnect.');
         });
@@ -535,12 +535,11 @@ function outlookContentScript(): void {
 
   function scanAndInject(): void {
     if (!/\/calendar\b/i.test(window.location.pathname)) {
-      document.getElementById(BTN_ID)?.remove();
+      removeHost();
       return;
     }
 
-    // Find the event detail panel by looking for data-app-section values
-    // that are NOT part of the standard calendar chrome (Ribbon, Surface, etc.)
+    // Find the event detail panel
     let detailPanel: Element | null = null;
     const chromeSections = new Set([
       'Ribbon', 'CopilotDabRibbon', 'CalendarModule', 'CalendarSurfaceNavigationToolbar',
@@ -551,7 +550,6 @@ function outlookContentScript(): void {
     for (const section of allSections) {
       const name = section.getAttribute('data-app-section') ?? '';
       if (name && !chromeSections.has(name) && !name.startsWith('calendar-view')) {
-        // Check if this section has event-like content (time pattern)
         const text = section.textContent ?? '';
         if (/\d{1,2}:\d{2}\s*(AM|PM)/i.test(text) || /invited/i.test(text)) {
           detailPanel = section;
@@ -560,16 +558,13 @@ function outlookContentScript(): void {
       }
     }
 
+    // No event detail panel open — remove button
     if (!detailPanel) {
-      document.getElementById('meetingscribe-shadow-host')?.remove();
-      buttonPlaced = false;
+      removeHost();
       return;
     }
 
-    // If already placed in shadow DOM, keep it
-    if (buttonPlaced && document.getElementById('meetingscribe-shadow-host')) return;
-
-    // Extract title from direct text nodes only (avoid "Join", "Chat" labels)
+    // Extract title
     let title = '(No title)';
     const candidates = detailPanel.querySelectorAll(
       'div[class], span[class], h1, h2, [role="heading"]',
@@ -586,14 +581,41 @@ function outlookContentScript(): void {
       directText = directText.trim();
       if (directText.length >= 3 && directText.length <= 150 &&
           !/^\d{1,2}[:/]\d{2}/.test(directText) &&
-          !/^(Accepted|Declined|invited|Join|Chat|Respond)/i.test(directText) &&
-          !directText.includes('Take Notes')) {
+          !/^(Accepted|Declined|invited|Join|Chat|Respond|https?:)/i.test(directText) &&
+          !directText.includes('Take Notes') &&
+          !directText.includes('Copilot')) {
         title = directText;
         break;
       }
     }
 
     if (title === '(No title)') return;
+
+    // Extract meeting time from the detail panel text
+    // Look for patterns like "Thu 4/9/2026 12:00 PM - 1:00 PM"
+    let startTime: string | undefined;
+    const panelText = detailPanel.textContent ?? '';
+    const timeMatch = panelText.match(
+      /(\d{1,2}\/\d{1,2}\/\d{4})\s+(\d{1,2}:\d{2}\s*(?:AM|PM))/i,
+    );
+    if (timeMatch) {
+      try {
+        const dateStr = `${timeMatch[1]} ${timeMatch[2]}`;
+        const parsed = new Date(dateStr);
+        if (!isNaN(parsed.getTime())) {
+          startTime = parsed.toISOString();
+        }
+      } catch { /* ignore parse errors */ }
+    }
+
+    // If the meeting title changed, remove old button and create new one
+    if (title !== currentMeetingTitle) {
+      removeHost();
+      currentMeetingTitle = title;
+    }
+
+    // If button already exists for this meeting, keep it
+    if (document.getElementById('meetingscribe-shadow-host')) return;
 
     // Use a Shadow DOM host so Outlook can't find or remove our button.
     // Outlook aggressively cleans unknown elements from document.body.
@@ -622,30 +644,24 @@ function outlookContentScript(): void {
     // Clear previous content
     shadow.innerHTML = '';
 
-    const btn = createButton(title);
+    const btn = createButton(title, startTime);
     btn.style.position = 'relative';
     btn.style.top = 'auto';
     btn.style.right = 'auto';
     btn.style.margin = '0';
     btn.style.boxShadow = '0 2px 8px rgba(0,0,0,0.2)';
     shadow.appendChild(btn);
-    buttonPlaced = true;
-    console.log(`[MeetingScribe] Take Notes button injected for: "${title}" (shadow DOM)`);
+    console.log(`[MeetingScribe] Take Notes button injected for: "${title}" startTime: ${startTime ?? 'unknown'}`);
   }
 
-  // Wait for calendar view to load, then inject once
-  function waitAndInject(): void {
-    if (buttonPlaced) return;
-    if (!/\/calendar\b/i.test(window.location.pathname)) {
-      setTimeout(waitAndInject, 2000);
-      return;
-    }
-    scanAndInject();
-    if (!buttonPlaced) {
-      setTimeout(waitAndInject, 2000);
-    }
+  function removeHost(): void {
+    document.getElementById('meetingscribe-shadow-host')?.remove();
+    currentMeetingTitle = '';
   }
-  waitAndInject();
+
+  // Poll every 2 seconds — detects meeting open/close/change
+  setInterval(scanAndInject, 2000);
+  scanAndInject();
 
   // SPA navigation: if user leaves calendar view, remove button
   let lastUrl = location.href;
