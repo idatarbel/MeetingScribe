@@ -21,14 +21,17 @@ console.log('[MeetingScribe] Google Calendar content script loaded.');
 // ---------------------------------------------------------------------------
 
 const EVENT_POPUP_SELECTORS = [
+  // Prefer the dialog popup (full event details) over the calendar chip (truncated)
+  '[role="dialog"]',
   '[data-eventid]',
-  '[role="dialog"][data-eventchip]',
   '.ecHOke',
 ];
 
 const ACTION_AREA_SELECTORS = [
+  '[role="dialog"] [data-eventid]',
   '[data-eventid] [data-tooltip]',
   '.pPTZAe',
+  '[role="dialog"]',
   '[data-eventid]',
 ];
 
@@ -47,27 +50,54 @@ function extractEventMetadata(container: Element): {
   const meta: ReturnType<typeof extractEventMetadata> = { title: '(No title)' };
 
   // --- Title ---
-  // 1. Try aria-label (often has full title)
-  const ariaLabel = container.getAttribute('aria-label');
-  if (ariaLabel && ariaLabel.length > 2) {
-    const cleanTitle = ariaLabel
-      .replace(/,\s*\w+day.*$/i, '')
-      .replace(/,\s*\d{1,2}\s+\w+.*$/i, '')
-      .trim();
-    if (cleanTitle.length > 2) meta.title = cleanTitle;
+  // Skip tooltip/button elements and find the actual event title.
+  // In the dialog popup, the title comes after action buttons (Close, Edit, Delete, etc.)
+  const skipTexts = new Set([
+    'close', 'edit event', 'delete event', 'email event details',
+    'options', 'print', 'duplicate', 'publish event', 'export',
+  ]);
+
+  // 1. Try heading elements
+  const headings = container.querySelectorAll(
+    'span[role="heading"], [data-eventid] span[role="heading"], h1, h2, h3',
+  );
+  for (const h of headings) {
+    const text = h.textContent?.trim();
+    if (text && text.length > 2 && text.length < 200 && !skipTexts.has(text.toLowerCase())) {
+      meta.title = text;
+      break;
+    }
   }
 
-  // 2. Try heading elements inside the popup
+  // 2. Try all spans — find the first substantial one that isn't a button/tooltip
   if (meta.title === '(No title)') {
-    const headings = container.querySelectorAll(
-      'span[role="heading"], [data-eventid] .r4nke, .tzcF6, [data-eventid] [dir="auto"]',
-    );
-    for (const h of headings) {
-      const text = h.textContent?.trim();
-      if (text && text.length > 2 && text.length < 200) {
-        meta.title = text;
-        break;
-      }
+    const spans = container.querySelectorAll('span');
+    for (const span of spans) {
+      if (span.children.length > 0) continue; // only leaf nodes
+      const text = span.textContent?.trim();
+      if (!text || text.length < 4 || text.length > 200) continue;
+      if (skipTexts.has(text.toLowerCase())) continue;
+      if (span.closest('[role="tooltip"]')) continue;
+      if (span.closest('button')) continue;
+      // Skip time patterns, email-like text, and common labels
+      if (/^\d{1,2}[:/]/.test(text)) continue;
+      if (/^(yes|no|maybe|accepted|declined|tentative)/i.test(text)) continue;
+      if (text.startsWith('Copy to')) continue;
+      meta.title = text;
+      break;
+    }
+  }
+
+  // 3. Fallback: aria-label on event container or child
+  if (meta.title === '(No title)') {
+    const eventEl = container.querySelector('[data-eventid]') ?? container;
+    const ariaLabel = eventEl.getAttribute('aria-label');
+    if (ariaLabel && ariaLabel.length > 2) {
+      const cleanTitle = ariaLabel
+        .replace(/,\s*\w+day.*$/i, '')
+        .replace(/,\s*\d{1,2}\s+\w+.*$/i, '')
+        .trim();
+      if (cleanTitle.length > 2) meta.title = cleanTitle;
     }
   }
 
@@ -173,8 +203,10 @@ function scanAndInject(): void {
     return;
   }
 
+  // Event ID: on the container itself or on a child element within the dialog
   const eventId =
     eventContainer.getAttribute('data-eventid') ??
+    eventContainer.querySelector('[data-eventid]')?.getAttribute('data-eventid') ??
     extractEventIdFromUrl() ??
     `gcal-${Date.now()}`;
 
