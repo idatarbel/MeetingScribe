@@ -58,15 +58,16 @@ export function App() {
   const [initialized, setInitialized] = useState(false);
   const autoSaveTimerRef = useRef<ReturnType<typeof setInterval> | null>(null);
 
-  // Draft key uses title + date — NOT the DOM eventId which is unreliable
-  // (Google Calendar reuses/changes event IDs across popup opens).
-  // This ensures "LiDAC Daily Stand Up" on 2026-04-10 gets a different draft
-  // than "Black Nile Strategy" on the same day.
+  // Draft key: use eventId (stable per event instance from Google Calendar's data-eventid)
+  // combined with date for recurring meetings. This prevents draft contamination
+  // across different meetings.
+  const safeEventId = eventId.replace(/[^a-zA-Z0-9]/g, '').slice(0, 30);
   const safeTitle = title.replace(/[^a-zA-Z0-9]/g, '_').slice(0, 40);
   const dateStr = startTime
     ? new Date(startTime).toISOString().slice(0, 10)
     : new Date().toISOString().slice(0, 10);
-  const draftKey = `${safeTitle}_${dateStr}`;
+  // Use eventId as primary key (unique per event), with title+date as fallback
+  const draftKey = safeEventId ? `${safeEventId}_${dateStr}` : `${safeTitle}_${dateStr}`;
 
   // The consistent base name used for cloud files (shared across attendees)
   const meetingBaseName = generateFileBaseName(title, startTime);

@@ -82,6 +82,9 @@ export function sendOpenNotesMessage(eventData: {
   title: string;
   startTime?: string;
   endTime?: string;
+  organizer?: string;
+  meetingLink?: string;
+  attendeesJson?: string;
 }): void {
   try {
     chrome.runtime.sendMessage({

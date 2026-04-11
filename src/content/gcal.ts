@@ -1,16 +1,9 @@
 /**
  * MeetingScribe — Google Calendar content script.
  *
- * Watches for event detail views (popup or full-page) and injects a
- * "Take Notes" button. Uses MutationObserver to handle SPA navigation.
- *
- * Google Calendar DOM structure (as of 2026):
- * - Event popup: div[data-eventid] containing event details
- * - Event detail page: URL contains /eventedit/ or /r/eventedit/ or /r/day/... with event selected
- * - Event title: [data-eventchip] or .UfeRlc or event detail heading
- *
- * These selectors are inherently fragile — Google can change their DOM at any time.
- * We use multiple fallback selectors and fail gracefully (no errors if injection fails).
+ * Watches for event detail popups and injects a "Take Notes" button.
+ * Extracts meeting metadata (title, time, organizer, attendees) directly
+ * from the DOM to reduce dependency on API enrichment.
  */
 
 import {
@@ -24,40 +17,151 @@ import {
 console.log('[MeetingScribe] Google Calendar content script loaded.');
 
 // ---------------------------------------------------------------------------
-// Selectors (ordered by specificity, with fallbacks)
+// Selectors
 // ---------------------------------------------------------------------------
 
-/** Selectors for the event detail popup (the bubble that appears when you click an event). */
 const EVENT_POPUP_SELECTORS = [
-  '[data-eventid]',                    // Primary: event container with data attribute
-  '[role="dialog"][data-eventchip]',   // Dialog variant
-  '.ecHOke',                           // Backup: event detail popup class (fragile)
+  '[data-eventid]',
+  '[role="dialog"][data-eventchip]',
+  '.ecHOke',
 ];
 
-/** Selectors for the event title inside a popup or detail view. */
-const EVENT_TITLE_SELECTORS = [
-  '[data-eventid] span[role="heading"]',
-  '[data-eventid] .r4nke',            // Event title class in popup
-  '.tzcF6',                           // Full-page event title
-  '[data-eventid] [dir="auto"]',      // Generic fallback
-];
-
-/** Selectors for the action button area in the event popup (where we inject our button). */
 const ACTION_AREA_SELECTORS = [
-  '[data-eventid] [data-tooltip]',     // Action buttons have tooltips
-  '.pPTZAe',                          // Action area wrapper
-  '[data-eventid]',                   // Last resort: append to event container itself
+  '[data-eventid] [data-tooltip]',
+  '.pPTZAe',
+  '[data-eventid]',
 ];
+
+// ---------------------------------------------------------------------------
+// Metadata extraction from Google Calendar DOM
+// ---------------------------------------------------------------------------
+
+function extractEventMetadata(container: Element): {
+  title: string;
+  startTime?: string;
+  endTime?: string;
+  organizer?: string;
+  attendees?: string; // JSON stringified array
+  meetingLink?: string;
+} {
+  const meta: ReturnType<typeof extractEventMetadata> = { title: '(No title)' };
+
+  // --- Title ---
+  // 1. Try aria-label (often has full title)
+  const ariaLabel = container.getAttribute('aria-label');
+  if (ariaLabel && ariaLabel.length > 2) {
+    const cleanTitle = ariaLabel
+      .replace(/,\s*\w+day.*$/i, '')
+      .replace(/,\s*\d{1,2}\s+\w+.*$/i, '')
+      .trim();
+    if (cleanTitle.length > 2) meta.title = cleanTitle;
+  }
+
+  // 2. Try heading elements inside the popup
+  if (meta.title === '(No title)') {
+    const headings = container.querySelectorAll(
+      'span[role="heading"], [data-eventid] .r4nke, .tzcF6, [data-eventid] [dir="auto"]',
+    );
+    for (const h of headings) {
+      const text = h.textContent?.trim();
+      if (text && text.length > 2 && text.length < 200) {
+        meta.title = text;
+        break;
+      }
+    }
+  }
+
+  // --- Extract all text from the popup for pattern matching ---
+  const popupText = container.textContent ?? '';
+
+  // --- Date/Time ---
+  // Google Calendar popup shows time like "Thursday, April 10, 2026 ⋅ 9:15 – 9:45am"
+  // or "Thursday, April 10 ⋅ 9:15 – 9:45 AM"
+  const timePatterns = [
+    // "April 10, 2026 ⋅ 9:15 – 9:45am" or "April 10, 2026 ⋅ 9:15 – 9:45 AM"
+    /(\w+\s+\d{1,2},?\s*\d{4})\s*[⋅·]\s*(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})\s*(am|pm)?/i,
+    // "Thursday, April 10 ⋅ 9:15 – 9:45am"
+    /(\w+,?\s+\w+\s+\d{1,2})\s*[⋅·]\s*(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})\s*(am|pm)?/i,
+    // Simpler: just find time range
+    /(\d{1,2}:\d{2})\s*[–-]\s*(\d{1,2}:\d{2})\s*(am|pm)?/i,
+  ];
+
+  for (const pattern of timePatterns) {
+    const match = popupText.match(pattern);
+    if (match) {
+      // Try to parse a full date+time
+      try {
+        if (match[1] && match[2] && match[3]) {
+          // Full date pattern
+          const dateStr = match[1].replace(/^\w+,?\s*/, ''); // remove day name
+          const ampm = match[4] ?? 'AM';
+          const startStr = `${dateStr} ${match[2]} ${ampm}`;
+          const endStr = `${dateStr} ${match[3]} ${ampm}`;
+          const startParsed = new Date(startStr);
+          const endParsed = new Date(endStr);
+          if (!isNaN(startParsed.getTime())) meta.startTime = startParsed.toISOString();
+          if (!isNaN(endParsed.getTime())) meta.endTime = endParsed.toISOString();
+        }
+      } catch { /* ignore parse errors */ }
+      break;
+    }
+  }
+
+  // --- Organizer ---
+  // Look for "Organizer" label or the event creator
+  const orgPatterns = [
+    /(?:Organizer|Created by)[:\s]+([A-Z][a-z]+(?:\s+[A-Z][a-z]+)+)/,
+    /(?:Organizer|Created by)[:\s]+([\w.+-]+@[\w.-]+)/,
+  ];
+  for (const pattern of orgPatterns) {
+    const match = popupText.match(pattern);
+    if (match) {
+      meta.organizer = match[1]?.trim();
+      break;
+    }
+  }
+
+  // --- Meeting link ---
+  // Look for conference URLs in the popup
+  const links = container.querySelectorAll('a[href]');
+  for (const link of links) {
+    const href = link.getAttribute('href') ?? '';
+    if (/meet\.google\.com|zoom\.us|teams\.microsoft\.com|webex\.com/i.test(href)) {
+      meta.meetingLink = href;
+      break;
+    }
+  }
+
+  // --- Attendees ---
+  // Google Calendar popup shows attendees as a list of names/emails
+  // Look for attendee-related elements
+  const attendeeElements = container.querySelectorAll(
+    '[data-email], [data-hovercard-id], [aria-label*="@"]',
+  );
+  if (attendeeElements.length > 0) {
+    const attendees: Array<{ name?: string; email: string }> = [];
+    for (const el of attendeeElements) {
+      const email = el.getAttribute('data-email') ??
+        el.getAttribute('data-hovercard-id') ??
+        el.getAttribute('aria-label')?.match(/[\w.+-]+@[\w.-]+/)?.[0];
+      if (email && email.includes('@')) {
+        const name = el.textContent?.trim();
+        attendees.push({ name: name !== email ? name : undefined, email });
+      }
+    }
+    if (attendees.length > 0) {
+      meta.attendees = JSON.stringify(attendees);
+    }
+  }
+
+  return meta;
+}
 
 // ---------------------------------------------------------------------------
 // Core logic
 // ---------------------------------------------------------------------------
 
-/**
- * Scan the DOM for an open event detail view and inject the button if found.
- */
 function scanAndInject(): void {
-  // Find the event popup/detail container
   let eventContainer: Element | null = null;
   for (const selector of EVENT_POPUP_SELECTORS) {
     eventContainer = document.querySelector(selector);
@@ -65,47 +169,20 @@ function scanAndInject(): void {
   }
 
   if (!eventContainer) {
-    // No event detail open — remove our button if it was left behind
     removeButton();
     return;
   }
 
-  // Extract event metadata
   const eventId =
     eventContainer.getAttribute('data-eventid') ??
     extractEventIdFromUrl() ??
     `gcal-${Date.now()}`;
 
-  // If our button already exists for THIS event, nothing to do.
-  // If it exists for a DIFFERENT event (user switched meetings), remove and re-inject.
   if (isButtonInjectedForEvent(eventId)) return;
-  removeButton(); // remove stale button from previous event
+  removeButton();
 
-  let title = '(No title)';
-
-  // Try aria-label on the event container first — often has the full untruncated title
-  const ariaTitle = eventContainer.getAttribute('aria-label');
-  if (ariaTitle && ariaTitle.length > 2) {
-    // aria-label may include date/time info — extract just the title part
-    // Format is often "Event Title, Date, Time" — take everything before the first comma with a date
-    const cleanTitle = ariaTitle.replace(/,\s*\w+day.*$/i, '').replace(/,\s*\d{1,2}\s+\w+.*$/i, '').trim();
-    if (cleanTitle.length > 2) {
-      title = cleanTitle;
-    } else {
-      title = ariaTitle;
-    }
-  }
-
-  // If aria-label didn't work, try DOM selectors
-  if (title === '(No title)') {
-    for (const selector of EVENT_TITLE_SELECTORS) {
-      const el = document.querySelector(selector);
-      if (el?.textContent?.trim()) {
-        title = el.textContent.trim();
-        break;
-      }
-    }
-  }
+  // Extract metadata directly from the DOM
+  const meta = extractEventMetadata(eventContainer);
 
   // Find where to inject the button
   let actionArea: Element | null = null;
@@ -116,24 +193,23 @@ function scanAndInject(): void {
 
   if (!actionArea) return;
 
-  // Create and inject the button
   const btn = createTakeNotesButton(() => {
     sendOpenNotesMessage({
       eventId,
       provider: 'google',
-      title,
+      title: meta.title,
+      startTime: meta.startTime,
+      endTime: meta.endTime,
+      organizer: meta.organizer,
+      meetingLink: meta.meetingLink,
+      attendeesJson: meta.attendees,
     });
   }, eventId);
 
-  // Insert as the last child of the action area, or after the last action button
   const parent = actionArea.parentElement ?? actionArea;
   parent.appendChild(btn);
 }
 
-/**
- * Try to extract a Google Calendar event ID from the current URL.
- * URLs like /r/eventedit/xxx or /r/event/xxx contain the event ID.
- */
 function extractEventIdFromUrl(): string | null {
   const match = window.location.pathname.match(/\/(?:eventedit|event)\/([^/]+)/);
   return match?.[1] ?? null;
@@ -145,7 +221,6 @@ function extractEventIdFromUrl(): string | null {
 
 const observer = createDebouncedObserver(scanAndInject, 500);
 
-// Start observing once the body is available
 if (document.body) {
   observer.observe(document.body, {
     childList: true,
@@ -153,16 +228,13 @@ if (document.body) {
   });
 }
 
-// Also run an initial scan
 scanAndInject();
 
-// Listen for SPA-style navigation (Google Calendar uses pushState)
 let lastUrl = location.href;
 const urlObserver = new MutationObserver(() => {
   if (location.href !== lastUrl) {
     lastUrl = location.href;
     removeButton();
-    // Delay scan slightly to let the new page render
     setTimeout(scanAndInject, 800);
   }
 });

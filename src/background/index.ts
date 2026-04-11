@@ -199,6 +199,7 @@ async function handleOpenNotes(payload: {
   endTime?: string;
   organizer?: string;
   meetingLink?: string;
+  attendeesJson?: string;
 }): Promise<void> {
   // Enrich from cached events — the content script only sends basic metadata,
   // but the cache has full event data (attendees, organizer, conferencing, etc.)
@@ -276,18 +277,23 @@ async function handleOpenNotes(payload: {
       : (fullEvent?.title ?? payload.title),
   });
 
+  // Merge metadata: prefer API data (more complete), fall back to content script DOM extraction
   const startTime = fullEvent?.startTime ?? payload.startTime;
   const endTime = fullEvent?.endTime ?? payload.endTime;
   if (startTime) params.set('startTime', startTime);
   if (endTime) params.set('endTime', endTime);
-  // Use cache data first, fall back to content script metadata
+
   const eventOrganizer = fullEvent?.organizer ?? payload.organizer;
   const eventMeetingLink = fullEvent?.dialIn?.url ?? payload.meetingLink;
   if (eventOrganizer) params.set('organizer', eventOrganizer);
   if (fullEvent?.location) params.set('location', fullEvent.location);
   if (eventMeetingLink) params.set('meetingLink', eventMeetingLink);
+
+  // Attendees: prefer API (has email+name), fall back to DOM extraction
   if (fullEvent?.attendees && fullEvent.attendees.length > 0) {
     params.set('attendees', JSON.stringify(fullEvent.attendees));
+  } else if (payload.attendeesJson) {
+    params.set('attendees', payload.attendeesJson);
   }
   if (fullEvent?.attachments && fullEvent.attachments.length > 0) {
     params.set('attachments', JSON.stringify(fullEvent.attachments));
