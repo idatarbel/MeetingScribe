@@ -82,11 +82,28 @@ function scanAndInject(): void {
   removeButton(); // remove stale button from previous event
 
   let title = '(No title)';
-  for (const selector of EVENT_TITLE_SELECTORS) {
-    const el = document.querySelector(selector);
-    if (el?.textContent?.trim()) {
-      title = el.textContent.trim();
-      break;
+
+  // Try aria-label on the event container first — often has the full untruncated title
+  const ariaTitle = eventContainer.getAttribute('aria-label');
+  if (ariaTitle && ariaTitle.length > 2) {
+    // aria-label may include date/time info — extract just the title part
+    // Format is often "Event Title, Date, Time" — take everything before the first comma with a date
+    const cleanTitle = ariaTitle.replace(/,\s*\w+day.*$/i, '').replace(/,\s*\d{1,2}\s+\w+.*$/i, '').trim();
+    if (cleanTitle.length > 2) {
+      title = cleanTitle;
+    } else {
+      title = ariaTitle;
+    }
+  }
+
+  // If aria-label didn't work, try DOM selectors
+  if (title === '(No title)') {
+    for (const selector of EVENT_TITLE_SELECTORS) {
+      const el = document.querySelector(selector);
+      if (el?.textContent?.trim()) {
+        title = el.textContent.trim();
+        break;
+      }
     }
   }
 

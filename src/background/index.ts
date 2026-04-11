@@ -220,17 +220,35 @@ async function handleOpenNotes(payload: {
 
     // Fallback: match by title (DOM event IDs may not match API event IDs)
     if (!fullEvent) {
-      // Try exact match first
+      const searchTitle = payload.title.toLowerCase();
+
+      // 1. Try exact match
       fullEvent = freshEvents.find(
-        (e) => e.title.toLowerCase() === payload.title.toLowerCase(),
+        (e) => e.title.toLowerCase() === searchTitle,
       );
-      // Try substring match (Google Calendar may show truncated titles)
+
+      // 2. Try substring match — pick the BEST match (shortest title that contains the search,
+      //    or longest search that the title contains). This handles truncated titles correctly:
+      //    "IconicChat" should match "IconicChat Team Meeting" over "IconicChat Status Meeting"
+      //    by preferring the event whose title starts with the search term.
       if (!fullEvent) {
-        fullEvent = freshEvents.find(
-          (e) => e.title.toLowerCase().includes(payload.title.toLowerCase()) ||
-                 payload.title.toLowerCase().includes(e.title.toLowerCase()),
+        const candidates = freshEvents.filter(
+          (e) => e.title.toLowerCase().includes(searchTitle) ||
+                 searchTitle.includes(e.title.toLowerCase()),
         );
+        if (candidates.length === 1) {
+          fullEvent = candidates[0];
+        } else if (candidates.length > 1) {
+          // Prefer: starts-with match > contains match, then shortest title
+          fullEvent = candidates.sort((a, b) => {
+            const aStarts = a.title.toLowerCase().startsWith(searchTitle) ? 0 : 1;
+            const bStarts = b.title.toLowerCase().startsWith(searchTitle) ? 0 : 1;
+            if (aStarts !== bStarts) return aStarts - bStarts;
+            return a.title.length - b.title.length;
+          })[0];
+        }
       }
+
       if (fullEvent) {
         console.log('[MeetingScribe] Matched event by title:', fullEvent.title);
       } else {
