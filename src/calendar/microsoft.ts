@@ -23,13 +23,14 @@ export async function fetchMicrosoftCalendarEvents(
   account: ConnectedAccount,
   timeMin?: string,
   timeMax?: string,
-  maxResults = 50,
+  maxResults = 250,
 ): Promise<CalendarEvent[]> {
   const accessToken = await getAccessToken(account.id);
   const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
-  const startDateTime = timeMin ?? now.toISOString();
+  const startDateTime = timeMin ?? thirtyDaysAgo.toISOString();
   const endDateTime = timeMax ?? weekFromNow.toISOString();
 
   // Use calendarView to expand recurring events

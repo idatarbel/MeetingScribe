@@ -23,14 +23,15 @@ export async function fetchGoogleCalendarEvents(
   account: ConnectedAccount,
   timeMin?: string,
   timeMax?: string,
-  maxResults = 50,
+  maxResults = 250,
 ): Promise<CalendarEvent[]> {
   const accessToken = await getAccessToken(account.id);
   const now = new Date();
+  const thirtyDaysAgo = new Date(now.getTime() - 30 * 24 * 60 * 60 * 1000);
   const weekFromNow = new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
 
   const params = new URLSearchParams({
-    timeMin: timeMin ?? now.toISOString(),
+    timeMin: timeMin ?? thirtyDaysAgo.toISOString(),
     timeMax: timeMax ?? weekFromNow.toISOString(),
     maxResults: String(maxResults),
     singleEvents: 'true',      // expand recurring events
