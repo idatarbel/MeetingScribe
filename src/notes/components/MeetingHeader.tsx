@@ -49,13 +49,22 @@ export function MeetingHeader({
         </p>
       )}
 
-      {attendees && attendees.length > 0 && (
+      {attendees && attendees.length > 0 && (() => {
+        // Deduplicate by email (API may return organizer as both organizer + attendee)
+        const seen = new Set<string>();
+        const unique = attendees.filter((a) => {
+          const key = a.email.toLowerCase();
+          if (seen.has(key)) return false;
+          seen.add(key);
+          return true;
+        });
+        return (
         <div className="mt-2">
           <p className="text-xs font-medium text-on-surface-muted uppercase tracking-wide">
-            Attendees ({attendees.length})
+            Attendees ({unique.length})
           </p>
           <div className="mt-1 flex flex-wrap gap-1">
-            {attendees.map((a) => (
+            {unique.map((a) => (
               <span
                 key={a.email}
                 className="inline-block px-2 py-0.5 text-xs bg-surface-bright text-on-surface-muted rounded-sm"
@@ -66,7 +75,8 @@ export function MeetingHeader({
             ))}
           </div>
         </div>
-      )}
+        );
+      })()}
     </div>
   );
 }
