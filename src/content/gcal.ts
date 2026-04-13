@@ -231,18 +231,17 @@ function scanAndInject(): void {
   }, eventId);
 
   // Inject into the toolbar row at the top of the event popup
-  // (the row with Close, Edit, Delete, Email, Options icons).
-  // These buttons have [data-tooltip] or [aria-label] attributes.
-  const toolbar = eventContainer.querySelector('[data-tooltip]')?.parentElement;
+  // (the row with Close, Edit, Delete, Options icons).
+  // These buttons have aria-label attributes like "Close", "Edit event", etc.
+  const closeBtn = eventContainer.querySelector('button[aria-label="Close"]');
+  const toolbar = closeBtn?.parentElement;
   if (toolbar) {
-    // Style to fit inline with the icon buttons
     btn.style.padding = '4px 12px';
     btn.style.fontSize = '12px';
     btn.style.height = 'auto';
     btn.style.lineHeight = '1.2';
     toolbar.appendChild(btn);
   } else {
-    // Fallback: append to the dialog content area
     const eventArea =
       eventContainer.querySelector('[data-eventid]') ?? eventContainer;
     (eventArea.parentElement ?? eventArea).appendChild(btn);
