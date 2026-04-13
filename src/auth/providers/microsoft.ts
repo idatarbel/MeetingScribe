@@ -134,13 +134,18 @@ export async function connectMicrosoftAccount(): Promise<ConnectedAccount> {
 // Token Refresh
 // ---------------------------------------------------------------------------
 
-/** Refresh an expired Microsoft access token using the stored refresh_token. */
+/**
+ * Refresh an expired Microsoft access token.
+ * SPA refresh tokens have a fixed 24-hour lifetime. When they expire,
+ * we automatically re-authenticate silently (no user interaction if the
+ * browser session is still active) or fall back to interactive login.
+ */
 export async function refreshMicrosoftToken(account: ConnectedAccount): Promise<void> {
   if (!account.refreshToken) {
-    throw new Error(
-      `Cannot refresh Microsoft account ${account.email}: no refresh_token stored. ` +
-      'Disconnect and re-connect the account.',
-    );
+    // No refresh token — try silent re-auth
+    console.log(`[MeetingScribe] No refresh token for ${account.email}, attempting silent re-auth`);
+    await silentReAuth(account);
+    return;
   }
 
   const response = await fetch(TOKEN_URL(), {
@@ -156,6 +161,12 @@ export async function refreshMicrosoftToken(account: ConnectedAccount): Promise<
 
   if (!response.ok) {
     const body = await response.text();
+    // AADSTS700084 = SPA refresh token expired (24h lifetime)
+    if (body.includes('700084') || body.includes('invalid_grant')) {
+      console.log(`[MeetingScribe] Microsoft refresh token expired for ${account.email}, re-authenticating`);
+      await silentReAuth(account);
+      return;
+    }
     throw new Error(`Microsoft token refresh failed (${response.status}): ${body}`);
   }
 
@@ -169,6 +180,120 @@ export async function refreshMicrosoftToken(account: ConnectedAccount): Promise<
   await updateTokens(account.id, {
     accessToken: data.access_token,
     // Microsoft may rotate the refresh_token on each refresh.
+    refreshToken: data.refresh_token,
+    expiresAt: Date.now() + data.expires_in * 1000,
+  });
+}
+
+// ---------------------------------------------------------------------------
+// Silent Re-authentication
+// ---------------------------------------------------------------------------
+
+/**
+ * Re-authenticate a Microsoft account when the SPA refresh token expires.
+ * Tries silent (non-interactive) auth first using `prompt=none` and `login_hint`.
+ * Falls back to interactive auth if silent fails.
+ */
+async function silentReAuth(account: ConnectedAccount): Promise<void> {
+  const verifier = (await import('../pkce')).generateCodeVerifier();
+  const challenge = await (await import('../pkce')).generateCodeChallenge(verifier);
+  const redirectUrl = getRedirectUrl();
+
+  // Try silent auth with prompt=none and login_hint
+  const params = new URLSearchParams({
+    client_id: getClientId(),
+    redirect_uri: redirectUrl,
+    response_type: 'code',
+    scope: getScopes(),
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    response_mode: 'query',
+    prompt: 'none',
+    login_hint: account.email,
+  });
+
+  try {
+    const responseUrl = await chrome.identity.launchWebAuthFlow({
+      url: `${AUTH_URL()}?${params.toString()}`,
+      interactive: false, // silent — no user interaction
+    });
+
+    if (responseUrl) {
+      const code = new URL(responseUrl).searchParams.get('code');
+      if (code) {
+        await exchangeCodeAndUpdate(code, verifier, redirectUrl, account);
+        console.log(`[MeetingScribe] Silent re-auth succeeded for ${account.email}`);
+        return;
+      }
+    }
+  } catch {
+    // Silent auth failed — expected if session expired
+  }
+
+  // Fall back to interactive auth
+  console.log(`[MeetingScribe] Silent re-auth failed, launching interactive login for ${account.email}`);
+  const interactiveParams = new URLSearchParams({
+    client_id: getClientId(),
+    redirect_uri: redirectUrl,
+    response_type: 'code',
+    scope: getScopes(),
+    code_challenge: challenge,
+    code_challenge_method: 'S256',
+    response_mode: 'query',
+    prompt: 'select_account',
+  });
+
+  const responseUrl = await chrome.identity.launchWebAuthFlow({
+    url: `${AUTH_URL()}?${interactiveParams.toString()}`,
+    interactive: true,
+  });
+
+  if (!responseUrl) {
+    throw new Error('Microsoft re-authentication was cancelled.');
+  }
+
+  const code = new URL(responseUrl).searchParams.get('code');
+  if (!code) {
+    throw new Error('Microsoft re-authentication failed: no code returned.');
+  }
+
+  await exchangeCodeAndUpdate(code, verifier, redirectUrl, account);
+  console.log(`[MeetingScribe] Interactive re-auth succeeded for ${account.email}`);
+}
+
+/** Exchange an auth code for tokens and update the existing account. */
+async function exchangeCodeAndUpdate(
+  code: string,
+  verifier: string,
+  redirectUrl: string,
+  account: ConnectedAccount,
+): Promise<void> {
+  const tokenResponse = await fetch(TOKEN_URL(), {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body: new URLSearchParams({
+      client_id: getClientId(),
+      code,
+      code_verifier: verifier,
+      grant_type: 'authorization_code',
+      redirect_uri: redirectUrl,
+      scope: getScopes(),
+    }),
+  });
+
+  if (!tokenResponse.ok) {
+    const body = await tokenResponse.text();
+    throw new Error(`Microsoft token exchange failed during re-auth (${tokenResponse.status}): ${body}`);
+  }
+
+  const data = (await tokenResponse.json()) as {
+    access_token: string;
+    refresh_token?: string;
+    expires_in: number;
+  };
+
+  await updateTokens(account.id, {
+    accessToken: data.access_token,
     refreshToken: data.refresh_token,
     expiresAt: Date.now() + data.expires_in * 1000,
   });
