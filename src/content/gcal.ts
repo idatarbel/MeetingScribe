@@ -242,11 +242,13 @@ function scanAndInject(): void {
   const toolbarContainer = closeBtn?.parentElement?.parentElement?.parentElement;
   const toolbar = toolbarContainer?.querySelector('.pPTZAe') ?? toolbarContainer;
   if (toolbar && closeBtn) {
-    btn.style.padding = '2px 10px';
+    btn.style.padding = '0px 8px';
     btn.style.fontSize = '11px';
-    btn.style.height = '28px';
+    btn.style.height = '24px';
     btn.style.lineHeight = '1';
     btn.style.borderRadius = '4px';
+    btn.style.position = 'relative';
+    btn.style.top = '4px';
     toolbar.appendChild(btn);
   } else {
     const eventArea =
