@@ -204,6 +204,18 @@ function scanAndInject(): void {
     return;
   }
 
+  // Skip event creation/edit dialogs — only inject on existing event popups.
+  // Creation dialogs have "Save" button or "Add title" text; existing events have [data-eventid].
+  const isCreationDialog = eventContainer.querySelector('button[aria-label="Save"]') ||
+    eventContainer.querySelector('[data-placeholder="Add title"]') ||
+    eventContainer.textContent?.includes('Add title');
+  const hasEventId = eventContainer.getAttribute('data-eventid') ||
+    eventContainer.querySelector('[data-eventid]');
+  if (isCreationDialog || !hasEventId) {
+    removeButton();
+    return;
+  }
+
   // Event ID: on the container itself or on a child element within the dialog
   const eventId =
     eventContainer.getAttribute('data-eventid') ??
