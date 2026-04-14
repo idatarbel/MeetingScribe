@@ -2,7 +2,7 @@
   "manifest_version": 3,
   "name": "MeetingScribe",
   "description": "Take notes on calendar meetings and save them to Google Drive, OneDrive, or Dropbox.",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "minimum_chrome_version": "116",
   "icons": {
     "16": "assets/icons/icon-16.png",

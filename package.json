@@ -1,6 +1,6 @@
 {
   "name": "meetingscribe",
-  "version": "0.0.1",
+  "version": "1.0.0",
   "private": true,
   "description": "Chrome extension for taking meeting notes and saving them to Google Drive, OneDrive, or Dropbox.",
   "type": "module",
@@ -56,6 +56,7 @@
     "eslint-plugin-react-hooks": "^7.0.1",
     "jsdom": "^29.0.2",
     "prettier": "^3.8.2",
+    "sharp": "^0.34.5",
     "tailwindcss": "^4.2.2",
     "typescript": "^5.9.3",
     "vite": "^5.4.21",

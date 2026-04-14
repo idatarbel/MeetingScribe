@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html><head><title>MeetingScribe API Test</title></head>
+<body>
+<h2>MeetingScribe API Test</h2>
+<button id="btn">Test OneDrive API</button>
+<pre id="output" style="background:#f0f0f0;padding:10px;white-space:pre-wrap;"></pre>
+<script>
+document.getElementById('btn').onclick = async () => {
+  const out = document.getElementById('output');
+  out.textContent = 'Loading...\n';
+
+  const r = await chrome.storage.local.get('connectedAccounts');
+  const ms = r.connectedAccounts?.microsoft?.find(a => a.email.includes('blacknile'));
+  if (!ms) { out.textContent = 'No blacknile account found'; return; }
+
+  const h = { Authorization: 'Bearer ' + ms.accessToken };
+
+  // 1. List own drive root
+  out.textContent += '\n=== YOUR OneDrive root folders ===\n';
+  try {
+    const resp1 = await fetch('https://graph.microsoft.com/v1.0/me/drive/root/children?$select=name,folder&$top=20', { headers: h });
+    const data1 = await resp1.json();
+    out.textContent += 'Status: ' + resp1.status + '\n';
+    (data1.value || []).forEach(i => {
+      out.textContent += '  ' + (i.folder ? '📁' : '📄') + ' ' + i.name + '\n';
+    });
+  } catch(e) { out.textContent += 'Error: ' + e.message + '\n'; }
+
+  // 2. Shared with me
+  out.textContent += '\n=== Shared with me ===\n';
+  try {
+    const resp2 = await fetch('https://graph.microsoft.com/v1.0/me/drive/sharedWithMe', { headers: h });
+    const data2 = await resp2.json();
+    out.textContent += 'Status: ' + resp2.status + ', Items: ' + (data2.value?.length || 0) + '\n';
+    (data2.value || []).forEach(i => {
+      out.textContent += '  ' + (i.folder ? '📁' : '📄') + ' ' + i.name + '\n';
+    });
+  } catch(e) { out.textContent += 'Error: ' + e.message + '\n'; }
+
+  // 3. Try Sarah's drive directly
+  out.textContent += '\n=== Sarah drive lookup ===\n';
+  try {
+    const resp3 = await fetch('https://graph.microsoft.com/v1.0/users/sarah.khan@blacknile.ai/drive?$select=id,driveType,owner', { headers: h });
+    const data3 = await resp3.json();
+    out.textContent += 'Status: ' + resp3.status + '\n';
+    out.textContent += JSON.stringify(data3, null, 2) + '\n';
+  } catch(e) { out.textContent += 'Error: ' + e.message + '\n'; }
+
+  out.textContent += '\nDone.';
+};
+</script>
+</body>
+</html>
