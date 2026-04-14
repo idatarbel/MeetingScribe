@@ -231,23 +231,23 @@ function scanAndInject(): void {
     });
   }, eventId);
 
-  // Inject into the toolbar row at the top of the event popup.
-  // Find the VISIBLE Close button (there may be multiple, some hidden).
+  // Inject into the toolbar row (div.pPTZAe) which contains pencil/trash/envelope/dots.
+  // The Close button is in a sibling container (div.M30cEf). Both are children of div.wv9rPe.
+  // Find the visible Close button, go up to its grandparent, then find .pPTZAe.
   const allCloseBtns = document.querySelectorAll('button[aria-label="Close"]');
   let closeBtn: Element | null = null;
   for (const b of allCloseBtns) {
     if ((b as HTMLElement).offsetParent !== null) { closeBtn = b; break; }
   }
-  const toolbar = closeBtn?.parentElement;
+  const toolbarContainer = closeBtn?.parentElement?.parentElement?.parentElement;
+  const toolbar = toolbarContainer?.querySelector('.pPTZAe') ?? toolbarContainer;
   if (toolbar && closeBtn) {
     btn.style.padding = '2px 10px';
     btn.style.fontSize = '11px';
     btn.style.height = '28px';
     btn.style.lineHeight = '1';
     btn.style.borderRadius = '4px';
-    btn.style.verticalAlign = 'bottom';
-    btn.style.marginTop = '8px';
-    toolbar.insertBefore(btn, closeBtn);
+    toolbar.appendChild(btn);
   } else {
     const eventArea =
       eventContainer.querySelector('[data-eventid]') ?? eventContainer;
