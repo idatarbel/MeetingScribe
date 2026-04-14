@@ -232,8 +232,12 @@ function scanAndInject(): void {
   }, eventId);
 
   // Inject into the toolbar row at the top of the event popup.
-  // Only "Close" button has a reliable aria-label. Insert before it.
-  const closeBtn = eventContainer.querySelector('button[aria-label="Close"]');
+  // Find the VISIBLE Close button (there may be multiple, some hidden).
+  const allCloseBtns = document.querySelectorAll('button[aria-label="Close"]');
+  let closeBtn: Element | null = null;
+  for (const b of allCloseBtns) {
+    if ((b as HTMLElement).offsetParent !== null) { closeBtn = b; break; }
+  }
   const toolbar = closeBtn?.parentElement;
   if (toolbar && closeBtn) {
     btn.style.padding = '2px 10px';
