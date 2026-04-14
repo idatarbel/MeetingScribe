@@ -21,8 +21,9 @@ console.log('[MeetingScribe] Google Calendar content script loaded.');
 // ---------------------------------------------------------------------------
 
 const EVENT_POPUP_SELECTORS = [
-  // Prefer the dialog popup (full event details) over the calendar chip (truncated)
-  '[role="dialog"]',
+  // Prefer dialog containing an event (existing event opened in detail view)
+  '[role="dialog"] [data-eventid]',
+  // Then standalone event popup (clicking an event on the calendar grid)
   '[data-eventid]',
   '.ecHOke',
 ];
@@ -200,18 +201,6 @@ function scanAndInject(): void {
   }
 
   if (!eventContainer) {
-    removeButton();
-    return;
-  }
-
-  // Skip event creation/edit dialogs — only inject on existing event popups.
-  // Creation dialogs have "Save" button or "Add title" text; existing events have [data-eventid].
-  const isCreationDialog = eventContainer.querySelector('button[aria-label="Save"]') ||
-    eventContainer.querySelector('[data-placeholder="Add title"]') ||
-    eventContainer.textContent?.includes('Add title');
-  const hasEventId = eventContainer.getAttribute('data-eventid') ||
-    eventContainer.querySelector('[data-eventid]');
-  if (isCreationDialog || !hasEventId) {
     removeButton();
     return;
   }
