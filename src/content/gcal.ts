@@ -236,10 +236,11 @@ function scanAndInject(): void {
   const closeBtn = eventContainer.querySelector('button[aria-label="Close"]');
   const toolbar = closeBtn?.parentElement;
   if (toolbar && closeBtn) {
-    btn.style.padding = '4px 12px';
-    btn.style.fontSize = '12px';
-    btn.style.height = 'auto';
-    btn.style.lineHeight = '1.2';
+    btn.style.padding = '2px 10px';
+    btn.style.fontSize = '11px';
+    btn.style.height = '28px';
+    btn.style.lineHeight = '1';
+    btn.style.borderRadius = '4px';
     toolbar.insertBefore(btn, closeBtn);
   } else {
     const eventArea =
