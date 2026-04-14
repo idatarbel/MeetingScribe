@@ -230,18 +230,16 @@ function scanAndInject(): void {
     });
   }, eventId);
 
-  // Inject into the toolbar row at the top of the event popup
-  // (the row with Close, Edit, Delete, Options icons).
-  // These buttons have aria-label attributes like "Close", "Edit event", etc.
-  // Insert before the Edit (pencil) button in the toolbar
-  const editBtn = eventContainer.querySelector('button[aria-label="Edit event"]');
-  const toolbar = editBtn?.parentElement;
-  if (toolbar && editBtn) {
+  // Inject into the toolbar row at the top of the event popup.
+  // Only "Close" button has a reliable aria-label. Insert before it.
+  const closeBtn = eventContainer.querySelector('button[aria-label="Close"]');
+  const toolbar = closeBtn?.parentElement;
+  if (toolbar && closeBtn) {
     btn.style.padding = '4px 12px';
     btn.style.fontSize = '12px';
     btn.style.height = 'auto';
     btn.style.lineHeight = '1.2';
-    toolbar.insertBefore(btn, editBtn);
+    toolbar.insertBefore(btn, closeBtn);
   } else {
     const eventArea =
       eventContainer.querySelector('[data-eventid]') ?? eventContainer;
