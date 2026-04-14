@@ -241,8 +241,8 @@ function scanAndInject(): void {
     btn.style.height = '28px';
     btn.style.lineHeight = '1';
     btn.style.borderRadius = '4px';
-    btn.style.alignSelf = 'flex-end';
-    btn.style.marginBottom = '0';
+    btn.style.verticalAlign = 'bottom';
+    btn.style.marginTop = '8px';
     toolbar.insertBefore(btn, closeBtn);
   } else {
     const eventArea =
